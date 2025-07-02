@@ -15,12 +15,6 @@ DataHandler::DataHandler()
     session_mutexes(shard_count), dispatcher_(this) {
 }
 
-//void DataHandler::add_session(int session_id, std::shared_ptr<SSLSession> session) {
-//    int shard = get_shard(session_id);
-//    std::lock_guard<std::mutex> lock(session_mutexes[shard]);
-//    session_buckets[shard][session_id] = session;
-//}
-
 void DataHandler::add_session(int session_id, std::shared_ptr<SSLSession> session) {
     int shard = get_shard(session_id);
     std::lock_guard<std::mutex> lock(session_mutexes[shard]);
@@ -36,13 +30,6 @@ void DataHandler::add_session(int session_id, std::shared_ptr<SSLSession> sessio
         std::cerr << "[add_session] Exception: " << e.what() << std::endl;
     }
 }
-
-
-//void DataHandler::remove_session(int session_id) {
-//    int shard = get_shard(session_id);
-//    std::lock_guard<std::mutex> lock(session_mutexes[shard]);
-//    session_buckets[shard].erase(session_id);
-//}
 
 void DataHandler::remove_session(int session_id) {
     int shard = get_shard(session_id);
@@ -61,7 +48,6 @@ void DataHandler::remove_session(int session_id) {
         std::cerr << "[remove_session] Exception: " << e.what() << std::endl;
     }
 }
-
 
 shared_ptr<SSLSession> DataHandler::get_session(int session_id) {
     int shard = get_shard(session_id);

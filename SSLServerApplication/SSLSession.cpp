@@ -59,23 +59,6 @@ void SSLSession::run_next_task() {
     fn();  // 비동기 작업 진입, 콜백 마지막에 run_next_task() 호출!
 }
 
-//void SSLSession::close_session() {
-//    try {
-//        // 1. 소켓 종료
-//        boost::system::error_code ec;
-//        socket_.lowest_layer().shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
-//        socket_.lowest_layer().close(ec);
-//
-//        // 2. 세션 삭제 요청 (단, DataHandler가 살아 있을 때만)
-//        if (auto handler = data_handler_.lock()) {
-//            handler->remove_session(session_id_);
-//        }
-//    }
-//    catch (const std::exception& e) {
-//        std::cerr << "[close_session] Exception: " << e.what() << std::endl;
-//    }
-//}
-
 void SSLSession::close_session() {
     // 중복 종료 방지: 이미 종료되었으면 바로 반환
     if (closed_.exchange(true)) return;
@@ -104,7 +87,6 @@ void SSLSession::close_session() {
         std::cerr << "[close_session] Exception: " << e.what() << std::endl;
     }
 }
-
 
 void SSLSession::post_write(const std::string& msg) {
     auto self = shared_from_this();
