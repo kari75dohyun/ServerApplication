@@ -18,6 +18,7 @@ DataHandler::DataHandler()
 void DataHandler::add_session(int session_id, std::shared_ptr<SSLSession> session) {
     int shard = get_shard(session_id);
     std::lock_guard<std::mutex> lock(session_mutexes[shard]);
+
     auto it = session_buckets[shard].find(session_id);
     if (it != session_buckets[shard].end()) {
         std::cerr << "[add_session] FATAL: session_id " << session_id << " already exists! Closing previous session." << std::endl;
