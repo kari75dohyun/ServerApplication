@@ -18,6 +18,19 @@ DataHandler::DataHandler()
 void DataHandler::add_session(int session_id, std::shared_ptr<SSLSession> session) {
     int shard = get_shard(session_id);
     std::lock_guard<std::mutex> lock(session_mutexes[shard]);
+<<<<<<<<< Temporary merge branch 1
+    try {
+        // 중복 검사(있으면 경고)
+        if (session_buckets[shard].count(session_id)) {
+            std::cerr << "[add_session] WARNING: session_id " << session_id << " already exists. Overwriting." << std::endl;
+        }
+        session_buckets[shard][session_id] = session;
+        std::cout << "[add_session] session_id=" << session_id << " added to shard " << shard << std::endl;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "[add_session] Exception: " << e.what() << std::endl;
+    }
+=========
     auto it = session_buckets[shard].find(session_id);
     if (it != session_buckets[shard].end()) {
         std::cerr << "[add_session] FATAL: session_id " << session_id << " already exists! Closing previous session." << std::endl;
@@ -26,6 +39,7 @@ void DataHandler::add_session(int session_id, std::shared_ptr<SSLSession> sessio
     }
     session_buckets[shard][session_id] = session;
     std::cout << "[add_session] session_id=" << session_id << " added to shard " << shard << std::endl;
+>>>>>>>>> Temporary merge branch 2
 }
 
 void DataHandler::remove_session(int session_id) {
