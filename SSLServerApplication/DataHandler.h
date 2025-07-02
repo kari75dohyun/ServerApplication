@@ -1,0 +1,67 @@
+﻿#pragma once
+#include <boost/asio.hpp>
+#include <string>
+#include <unordered_map>
+#include <memory>
+#include <mutex>
+#include <functional>
+#include "MessageDispatcher.h"   // 추가!
+
+
+class SSLSession;  // 전방 선언, SSLSession 클래스가 정의되기 전에 사용
+
+class DataHandler {
+private:
+    unsigned int shard_count = 0;
+    std::vector<std::unordered_map<int, std::shared_ptr<SSLSession>>> session_buckets;
+    std::vector<std::mutex> session_mutexes;
+
+    int get_shard(int session_id) const {
+        return session_id % shard_count;
+    }
+
+    // 함수포인터(람다) 기반 Dispatcher
+    MessageDispatcher dispatcher_;
+
+public:
+    DataHandler(); // 생성자 선언 필요!
+    // *** 여기! 복사 금지 선언 추가 ***
+    DataHandler(const DataHandler&) = delete;
+    DataHandler& operator=(const DataHandler&) = delete;
+    // TCP/SSL 세션 관리 
+    // 세션 추가
+    void add_session(int session_id, std::shared_ptr<SSLSession> session);
+
+    // 세션 제거
+    void remove_session(int session_id);
+
+    // 세션 찾기
+    // std::shared_ptr<SSLSession> get_session(int session_id) const;
+    std::shared_ptr<SSLSession> get_session(int session_id);
+
+    // SSL 핸드쉐이크를 비동기적으로 수행하는 함수
+    void do_handshake(std::shared_ptr<SSLSession> session);
+
+    // 데이터 읽기
+    void do_read(std::shared_ptr<SSLSession> session);
+
+    // 데이터 쓰기
+    //void do_write(std::shared_ptr<SSLSession> session);
+
+	// 브로드캐스트 메시지 전송
+    void broadcast(const std::string& msg, int sender_session_id, std::shared_ptr<SSLSession> session);
+
+	// UDP 메시지 수신 처리
+    void on_udp_receive(const std::string& msg, const boost::asio::ip::udp::endpoint& from,
+        boost::asio::ip::udp::socket& udp_socket);
+
+    // 전체 세션을 정확하게 순회하는 함수(콜백 전달 방식)
+    void for_each_session(std::function<void(const std::shared_ptr<SSLSession>&)> fn);
+    size_t get_total_session_count();
+
+    void broadcast_strict(const std::string& msg);  //
+    template<typename Func>
+    void for_each_session(Func&& func);             // 
+};
+
+
