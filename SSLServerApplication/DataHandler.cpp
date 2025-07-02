@@ -18,13 +18,35 @@ DataHandler::DataHandler()
 void DataHandler::add_session(int session_id, std::shared_ptr<SSLSession> session) {
     int shard = get_shard(session_id);
     std::lock_guard<std::mutex> lock(session_mutexes[shard]);
-    session_buckets[shard][session_id] = session;
+    try {
+        // 중복 검사(있으면 경고)
+        if (session_buckets[shard].count(session_id)) {
+            std::cerr << "[add_session] WARNING: session_id " << session_id << " already exists. Overwriting." << std::endl;
+        }
+        session_buckets[shard][session_id] = session;
+        std::cout << "[add_session] session_id=" << session_id << " added to shard " << shard << std::endl;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "[add_session] Exception: " << e.what() << std::endl;
+    }
 }
 
 void DataHandler::remove_session(int session_id) {
     int shard = get_shard(session_id);
     std::lock_guard<std::mutex> lock(session_mutexes[shard]);
-    session_buckets[shard].erase(session_id);
+    try {
+        auto it = session_buckets[shard].find(session_id);
+        if (it != session_buckets[shard].end()) {
+            session_buckets[shard].erase(it);
+            std::cout << "[remove_session] session_id=" << session_id << " removed from shard " << shard << std::endl;
+        }
+        else {
+            std::cout << "[remove_session] session_id=" << session_id << " not found (already removed?)" << std::endl;
+        }
+    }
+    catch (const std::exception& e) {
+        std::cerr << "[remove_session] Exception: " << e.what() << std::endl;
+    }
 }
 
 shared_ptr<SSLSession> DataHandler::get_session(int session_id) {

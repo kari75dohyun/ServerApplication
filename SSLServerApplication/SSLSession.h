@@ -37,6 +37,8 @@ private:
     static constexpr size_t MAX_WRITE_QUEUE = 1000;
     static constexpr size_t MAX_TASK_QUEUE = 1000;
 
+    std::atomic<bool> closed_{ false };   // 중복 종료 방지 플래그 추가
+
 public:
     // 생성자: 클라이언트 소켓과 SSL 컨텍스트를 받아 SSL 스트림을 초기화
     SSLSession(boost::asio::ip::tcp::socket socket, boost::asio::ssl::context& context, int session_id, std::weak_ptr<DataHandler> data_handler);

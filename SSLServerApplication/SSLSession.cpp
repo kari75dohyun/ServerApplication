@@ -60,15 +60,27 @@ void SSLSession::run_next_task() {
 }
 
 void SSLSession::close_session() {
-    try {
-        // 1. 소켓 종료
-        boost::system::error_code ec;
-        socket_.lowest_layer().shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
-        socket_.lowest_layer().close(ec);
+    // 중복 종료 방지: 이미 종료되었으면 바로 반환
+    if (closed_.exchange(true)) return;
 
-        // 2. 세션 삭제 요청 (단, DataHandler가 살아 있을 때만)
+    try {
+        // 1. 세션 삭제
         if (auto handler = data_handler_.lock()) {
             handler->remove_session(session_id_);
+        }
+        else {
+            std::cerr << "[close_session] DataHandler expired!" << std::endl;
+        }
+
+        // 2. 소켓 안전 종료
+        boost::system::error_code ec;
+        socket_.lowest_layer().shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+        if (ec) {
+            std::cerr << "[close_session] shutdown error: " << ec.message() << std::endl;
+        }
+        socket_.lowest_layer().close(ec);
+        if (ec) {
+            std::cerr << "[close_session] close error: " << ec.message() << std::endl;
         }
     }
     catch (const std::exception& e) {
