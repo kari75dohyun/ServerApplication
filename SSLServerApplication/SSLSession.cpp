@@ -11,7 +11,8 @@ SSLSession::SSLSession(tcp::socket socket, ssl::context& context, int session_id
     : socket_(std::move(socket), context),  
       session_id_(session_id),  
       data_handler_(data_handler),
-      strand_(boost::asio::make_strand(socket_.get_executor())) { // Ensure make_strand is used correctly  
+      strand_(boost::asio::make_strand(socket_.get_executor())),
+      ssl_context_(context) { // Ensure make_strand is used correctly  
     memset(data_, 0, sizeof(data_));
 }
 
@@ -34,7 +35,9 @@ int SSLSession::get_session_id() const {
 
 void SSLSession::post_task(std::function<void()> fn) {
     auto self = shared_from_this();
+    std::cout << "[DEBUG] post_task called (session_id=" << session_id_ << ")" << std::endl;
     boost::asio::dispatch(strand_, [this, self, fn = std::move(fn)]() mutable {
+        std::cout << "[DEBUG] task enqueued" << std::endl;
         if (task_queue_.size() >= MAX_TASK_QUEUE) {
             std::cerr << "[WARN] task_queue_ overflow! (session_id=" << session_id_ << ")\n";
             close_session();  // 또는 에러 메시지, 혹은 그냥 무시
@@ -48,23 +51,23 @@ void SSLSession::post_task(std::function<void()> fn) {
         });
 }
 
-
 void SSLSession::run_next_task() {
+    std::cout << "[DEBUG] run_next_task()" << std::endl;
     if (task_queue_.empty()) {
         task_running_ = false;
         return;
     }
     auto fn = std::move(task_queue_.front());
     task_queue_.pop();
+    std::cout << "[DEBUG] running fn()" << std::endl;
     fn();  // 비동기 작업 진입, 콜백 마지막에 run_next_task() 호출!
 }
 
 void SSLSession::close_session() {
-    // 중복 종료 방지: 이미 종료되었으면 바로 반환
     if (closed_.exchange(true)) return;
 
     try {
-        // 1. 세션 삭제
+        // 1. 세션 삭제 (release도 내부에서 처리)
         if (auto handler = data_handler_.lock()) {
             handler->remove_session(session_id_);
         }
@@ -82,6 +85,8 @@ void SSLSession::close_session() {
         if (ec) {
             std::cerr << "[close_session] close error: " << ec.message() << std::endl;
         }
+
+        // 3. (더 이상 remove_session, release 등 중복 호출하지 않음!)
     }
     catch (const std::exception& e) {
         std::cerr << "[close_session] Exception: " << e.what() << std::endl;
@@ -107,7 +112,6 @@ void SSLSession::post_write(const std::string& msg) {
         });
 }
 
-
 void SSLSession::do_write_queue() {
     auto self = shared_from_this();
     if (write_queue_.empty()) {
@@ -130,3 +134,63 @@ void SSLSession::do_write_queue() {
         )
     );
 }
+
+void SSLSession::reset(boost::asio::ip::tcp::socket&& socket, int session_id) {
+    //std::cout << "[reset] this = " << this
+    //    << ", session_id = " << session_id
+    //    << ", socket.is_open() = " << socket.is_open()
+    //    << std::endl;
+
+    socket_ = boost::asio::ssl::stream<boost::asio::ip::tcp::socket>(
+        std::move(socket),
+        ssl_context_
+    );
+
+    // socket_ 할당 직후 내부 상태
+    //std::cout << "[reset] socket_ next_layer().is_open() = "
+    //    << socket_.next_layer().is_open() << std::endl;
+
+    // executor 상태 체크
+    auto exec = socket_.get_executor();
+    //std::cout << "[reset] socket_.get_executor() addr = " << &exec << std::endl;
+
+    // strand_ 할당 전후
+    //std::cout << "[reset] strand_ 할당 전" << std::endl;
+    strand_ = boost::asio::make_strand(socket_.get_executor());
+    //std::cout << "[reset] strand_ 할당 후, &strand_ = " << &strand_ << std::endl;
+
+    // 이하 동일
+    session_id_ = session_id;
+    nickname_.clear();
+    line_buffer_.clear();
+    message_.clear();
+    memset(data_, 0, sizeof(data_));
+
+    std::queue<std::function<void()>> empty;
+    std::swap(task_queue_, empty);
+    task_running_ = false;
+    read_pending_ = false;
+
+    //std::cout << "[SSLSession reset] strand addr: " << &strand_ << std::endl;
+}
+
+
+
+//void SSLSession::reset(boost::asio::ip::tcp::socket&& socket, int session_id) {
+//    socket_ = boost::asio::ssl::stream<boost::asio::ip::tcp::socket>(
+//        std::move(socket),
+//        ssl_context_
+//    );
+//    // 이하 동일!
+//    session_id_ = session_id;
+//    nickname_.clear();
+//    line_buffer_.clear();
+//    message_.clear();
+//    memset(data_, 0, sizeof(data_));
+//
+//    std::queue<std::function<void()>> empty;
+//    std::swap(task_queue_, empty);
+//    task_running_ = false;
+//    read_pending_ = false;
+//    // 기타 필요 상태 초기화
+//}

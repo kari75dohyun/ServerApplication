@@ -39,6 +39,8 @@ private:
 
     std::atomic<bool> closed_{ false };   // 중복 종료 방지 플래그 추가
 
+    boost::asio::ssl::context& ssl_context_;   // 추가!
+
 public:
     // 생성자: 클라이언트 소켓과 SSL 컨텍스트를 받아 SSL 스트림을 초기화
     SSLSession(boost::asio::ip::tcp::socket socket, boost::asio::ssl::context& context, int session_id, std::weak_ptr<DataHandler> data_handler);
@@ -91,6 +93,9 @@ public:
     MessageBufferManager& get_msg_buffer() { return msg_buf_mgr_; }
 	// write 메시지 큐 관련 함수 (직렬화)
     void post_write(const std::string& msg);
+
+	// Session 재설정 함수
+    void reset(boost::asio::ip::tcp::socket&& socket, int session_id);
 
 private:
     void do_write_queue();

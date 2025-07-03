@@ -104,6 +104,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -119,6 +120,7 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -129,6 +131,7 @@
     <ClCompile Include="DataHandler.cpp" />
     <ClCompile Include="MessageBufferManager.cpp" />
     <ClCompile Include="MessageDispatcher.cpp" />
+    <ClCompile Include="SessionPool.cpp" />
     <ClCompile Include="SSLServer.cpp" />
     <ClCompile Include="SSLServerApplication.cpp" />
     <ClCompile Include="SSLSession.cpp" />
@@ -138,6 +141,7 @@
     <ClInclude Include="DataHandler.h" />
     <ClInclude Include="MessageBufferManager.h" />
     <ClInclude Include="MessageDispatcher.h" />
+    <ClInclude Include="SessionPool.h" />
     <ClInclude Include="SSLServer.h" />
     <ClInclude Include="SSLSession.h" />
     <ClInclude Include="UDPManager.h" />

@@ -17,27 +17,30 @@ using namespace std;
 using boost::asio::ip::tcp;
 using namespace boost::asio;
 
+constexpr size_t POOL_SIZE = 1024; // 원하는 값으로!
+
 int main() {
     SetConsoleOutputCP(CP_UTF8);  // 출력
     SetConsoleCP(CP_UTF8);        // 입력
     setlocale(LC_ALL, "");        // 로케일 설정
     try {
         boost::asio::io_context io;
-
         ssl::context context(ssl::context::tlsv12);
+
         context.use_certificate_chain_file("D://Study//Boost_MulitThread_Strand_Parallel_SSL//x64//Debug//server.pem");
         context.use_private_key_file("D://Study//Boost_MulitThread_Strand_Parallel_SSL//x64//Debug//server.key", ssl::context::pem);
-        
+
         // DataHandler 객체 생성 및 공유 포인터로 관리
         auto data_handler = std::make_shared<DataHandler>();
+        auto session_pool = std::make_shared<SessionPool>(POOL_SIZE, io, context, data_handler);
 
-        // DataHandler를 생성자에 전달
-        SSLServer server(io, 12345, context, data_handler);
+        SSLServer server(io, 12345, context, data_handler, session_pool);
+
 
 		UDPManager udp_manager(io, 54321, data_handler); // UDP 매니저 생성
         //auto udp_server = std::make_shared<UDPManager>(io, 54321); // 예: 54321 포트
 
-        cout << "SSL Echo 서버 started on port 12345" << endl;
+        cout << "SSL Echo Server started on port 12345" << endl;
 
         size_t thread_count = std::thread::hardware_concurrency();
         if (thread_count == 0) thread_count = 4;

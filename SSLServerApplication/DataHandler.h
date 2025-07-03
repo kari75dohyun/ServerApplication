@@ -6,9 +6,11 @@
 #include <mutex>
 #include <functional>
 #include "MessageDispatcher.h"   // 추가!
+#include "SessionPool.h"         // 세션 풀 헤더 추가
 
 
 class SSLSession;  // 전방 선언, SSLSession 클래스가 정의되기 전에 사용
+class SessionPool; // 전방 선언, SessionPool 클래스가 정의되기 전에 사용
 
 class DataHandler {
 private:
@@ -23,11 +25,14 @@ private:
     // 함수포인터(람다) 기반 Dispatcher
     MessageDispatcher dispatcher_;
 
+    std::shared_ptr<SessionPool> session_pool_;  // 세션 풀 멤버 추가  
+
 public:
     DataHandler(); // 생성자 선언 필요!
     // *** 여기! 복사 금지 선언 추가 ***
     DataHandler(const DataHandler&) = delete;
     DataHandler& operator=(const DataHandler&) = delete;
+
     // TCP/SSL 세션 관리 
     // 세션 추가
     void add_session(int session_id, std::shared_ptr<SSLSession> session);
@@ -59,9 +64,17 @@ public:
     void for_each_session(std::function<void(const std::shared_ptr<SSLSession>&)> fn);
     size_t get_total_session_count();
 
-    void broadcast_strict(const std::string& msg);  //
+    void broadcast_strict(const std::string& msg);
     template<typename Func>
-    void for_each_session(Func&& func);             // 
+    void for_each_session(Func&& func);
+
+    // 세션 풀에 대한 getter 추가  
+    std::shared_ptr<SessionPool> get_session_pool() const {
+        return session_pool_;
+    }
+
+    // 세션 풀 설정 함수 추가  
+    void set_session_pool(std::shared_ptr<SessionPool> pool) {
+        session_pool_ = std::move(pool);
+    }
 };
-
-

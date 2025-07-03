@@ -31,10 +31,12 @@ void DataHandler::add_session(int session_id, std::shared_ptr<SSLSession> sessio
 
 void DataHandler::remove_session(int session_id) {
     int shard = get_shard(session_id);
-    std::lock_guard<std::mutex> lock(session_mutexes[shard]);
-    try {
+    std::shared_ptr<SSLSession> session;
+    {
+        std::lock_guard<std::mutex> lock(session_mutexes[shard]);
         auto it = session_buckets[shard].find(session_id);
         if (it != session_buckets[shard].end()) {
+            session = it->second; // shared_ptr를 먼저 확보
             session_buckets[shard].erase(it);
             std::cout << "[remove_session] session_id=" << session_id << " removed from shard " << shard << std::endl;
         }
@@ -42,8 +44,12 @@ void DataHandler::remove_session(int session_id) {
             std::cout << "[remove_session] session_id=" << session_id << " not found (already removed?)" << std::endl;
         }
     }
-    catch (const std::exception& e) {
-        std::cerr << "[remove_session] Exception: " << e.what() << std::endl;
+    // 락을 풀고 나서 release를 호출 (컨테이너/락과 완전히 분리)
+    if (session) {
+        auto pool = get_session_pool();
+        if (pool) {
+            pool->release(session);
+        }
     }
 }
 
@@ -102,6 +108,7 @@ void DataHandler::do_read(shared_ptr<SSLSession> session) {
                         // 2. 여러 메시지 추출 및 처리
                         while (auto opt_msg = self->get_msg_buffer().extract_message()) {
                             try {
+                                std::cout << "[DEBUG] dispatching message" << std::endl;
                                 json msg = json::parse(*opt_msg);
                                 dispatcher_.dispatch(self, msg);
                             }
@@ -160,24 +167,6 @@ void DataHandler::do_read(shared_ptr<SSLSession> session) {
     });
 }
 
-//void DataHandler::do_write(shared_ptr<SSLSession> session) {
-//    auto self = session;
-//    auto& strand = session->get_strand();
-//    async_write(session->get_socket(), buffer(self->get_message()),
-//        boost::asio::bind_executor(strand, [this, self](const boost::system::error_code& ec, std::size_t length) {
-//            if (!ec) {
-//                std::cout << "Sent: " << self->get_message() << std::endl;
-//                //do_read(self);  // do_read도 마찬가지(아래 주의)
-//            }
-//            else {
-//                std::cerr << "Write failed: " << ec.message() << std::endl;
-//                self->close_session();
-//            }
-//            self->run_next_task(); // 직렬화 큐 구조
-//            })
-//    );
-//}
-
 void DataHandler::broadcast(const std::string& msg, int sender_session_id, std::shared_ptr<SSLSession> /*session*/) {
     std::vector<std::shared_ptr<SSLSession>> targets;
 
@@ -204,51 +193,6 @@ void DataHandler::broadcast(const std::string& msg, int sender_session_id, std::
         }
     }
 }
-
-
-//void DataHandler::broadcast(const std::string& msg, int sender_session_id, std::shared_ptr<SSLSession> /*session*/) {
-//    std::vector<std::shared_ptr<SSLSession>> targets;
-//
-//    // 1. 각 샤드별로 lock (세션 포인터만 복사)
-//    for (unsigned int shard = 0; shard < shard_count; ++shard) {
-//        std::lock_guard<std::mutex> lock(session_mutexes[shard]);
-//        for (const auto& [id, sess] : session_buckets[shard]) {
-//            // 반드시 본인 세션은 브로드캐스트 대상에서 제외
-//            if (sess && id != sender_session_id) {
-//                targets.push_back(sess);
-//            }
-//        }
-//    }
-//
-//    // 2. 락 해제 후 각 세션에 post_task로 write 작업 직렬화
-//    for (auto& sess : targets) {
-//        try {
-//            // 로그 남기기
-//            std::cout << "[broadcast] target session_id=" << sess->get_session_id()
-//                << " (sender_session_id=" << sender_session_id << ")" << std::endl;
-//
-//            sess->post_task([this, sess, msg]() {
-//                sess->set_message(msg);
-//                async_write(sess->get_socket(), buffer(sess->get_message()),
-//                    boost::asio::bind_executor(sess->get_strand(),
-//                        [this, sess](const boost::system::error_code& ec, std::size_t /*length*/) {
-//                            if (ec) {
-//                                std::cerr << "[broadcast] Write failed: " << ec.message() << std::endl;
-//                                sess->close_session();
-//                            }
-//                            sess->run_next_task(); // 꼭 마지막에!
-//                        }
-//                    )
-//                );
-//                });
-//        }
-//        catch (const std::exception& e) {
-//            std::cerr << "[broadcast] Exception scheduling broadcast: " << e.what() << std::endl;
-//        }
-//    }
-//}
-
-
 
 // UDP 메시지 수신 처리
 void DataHandler::on_udp_receive(const std::string& msg, const udp::endpoint& from, udp::socket& udp_socket) {
