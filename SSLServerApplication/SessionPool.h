@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 #include <vector>
 #include <queue>
 #include <memory>
@@ -9,13 +9,12 @@
 
 class SessionPool {
 public:
-    SessionPool(size_t pool_size, boost::asio::io_context& io, boost::asio::ssl::context& context, std::weak_ptr<DataHandler> handler);
-
-    // »ç¿ë °¡´ÉÇÑ ¼¼¼Ç È¹µæ (¾øÀ¸¸é nullptr ¹İÈ¯)
+    SessionPool(size_t pool_size, size_t max_size, boost::asio::io_context& io, boost::asio::ssl::context& context, std::weak_ptr<DataHandler> handler);
+    // ì‚¬ìš© ê°€ëŠ¥í•œ ì„¸ì…˜ íšë“ (ì—†ìœ¼ë©´ nullptr ë°˜í™˜)
     std::shared_ptr<SSLSession> acquire(boost::asio::ip::tcp::socket&& socket, int session_id);
-
-    // ¼¼¼Ç ¹İÈ¯(Àç»ç¿ë)
+    // ì„¸ì…˜ ë°˜í™˜(ì¬ì‚¬ìš©)
     void release(std::shared_ptr<SSLSession> session);
+    size_t pool_size() const { return pool_.size(); }  // í˜„ì¬ í’€ í¬ê¸° ë°˜í™˜
 
 private:
     std::vector<std::shared_ptr<SSLSession>> pool_;
@@ -24,6 +23,7 @@ private:
     boost::asio::ssl::context& context_;
     std::weak_ptr<DataHandler> handler_;
 
-    boost::asio::io_context& io_; // Ãß°¡
+    boost::asio::io_context& io_;
+    size_t max_size_;   // ìµœëŒ€ í™•ì¥ì¹˜!
 };
 

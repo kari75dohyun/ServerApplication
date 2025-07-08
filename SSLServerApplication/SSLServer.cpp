@@ -3,6 +3,7 @@
 #include "SessionPool.h"
 #include <iostream>
 #include <boost/asio.hpp>
+#include "Logger.h"
 
 using namespace std;
 using boost::asio::ip::tcp;
@@ -22,9 +23,14 @@ void SSLServer::start_accept() {
                 data_handler_->add_session(session_id, session);
                 session->start();
                 std::cout << "New client connected, session ID: " << session_id << std::endl;
+                //LOG_INFO("New client connected, session ID: ", session_id);
+                g_logger->info("New client connected, session ID: {}", session_id);
             }
             else {
                 std::cerr << "[SESSION POOL] No free session available!" << std::endl;
+                //LOG_ERROR("[SESSION POOL] No free session available!");
+                g_logger->info("[SESSION POOL] No free session available!");
+
                 // 연결 닫기 등 예외 처리
             }
         }

@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <boost/asio.hpp>
 
 class SSLSession;
 class DataHandler;
@@ -14,6 +15,9 @@ public:
     MessageDispatcher(DataHandler* handler); // DataHandler 포인터 주입
 
     void dispatch(std::shared_ptr<SSLSession> session, const nlohmann::json& msg);
+
+    void dispatch_udp(std::shared_ptr<SSLSession> session, const std::string& raw_msg,
+        const boost::asio::ip::udp::endpoint& from, boost::asio::ip::udp::socket& udp_socket);
 
     void register_handler(const std::string& type, HandlerFunc handler);
 
