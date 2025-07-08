@@ -35,20 +35,29 @@ std::shared_ptr<SSLSession> SessionPool::acquire(boost::asio::ip::tcp::socket&& 
 }  
 
 void SessionPool::release(std::shared_ptr<SSLSession> session) {
-    std::cout << "[release] session=" << session.get() << std::endl;
-    // 이미 available_indices_에 들어있는 idx인지 체크!
+    // 중복 release는 remove_session에서 체크하므로, 여기서는 간결하게!
     auto it = std::find(pool_.begin(), pool_.end(), session);
     if (it != pool_.end()) {
         size_t idx = std::distance(pool_.begin(), it);
-        std::cout << "[release] pool_ idx=" << idx << std::endl;
-
-        // idx가 이미 available_indices_에 있으면 “이중 반환” 의심!
-        std::queue<size_t> tmp = available_indices_;
-        bool found = false;
-        while (!tmp.empty()) {
-            if (tmp.front() == idx) found = true;
-            tmp.pop();
-        }
-        if (found) std::cout << "[release] WARNING: idx already available! (중복 반환)" << std::endl;
+        available_indices_.push(idx);
     }
 }
+
+//void SessionPool::release(std::shared_ptr<SSLSession> session) {
+//    std::cout << "[release] session=" << session.get() << std::endl;
+//    // 이미 available_indices_에 들어있는 idx인지 체크!
+//    auto it = std::find(pool_.begin(), pool_.end(), session);
+//    if (it != pool_.end()) {
+//        size_t idx = std::distance(pool_.begin(), it);
+//        std::cout << "[release] pool_ idx=" << idx << std::endl;
+//
+//        // idx가 이미 available_indices_에 있으면 “이중 반환” 의심!
+//        std::queue<size_t> tmp = available_indices_;
+//        bool found = false;
+//        while (!tmp.empty()) {
+//            if (tmp.front() == idx) found = true;
+//            tmp.pop();
+//        }
+//        if (found) std::cout << "[release] WARNING: idx already available! (중복 반환)" << std::endl;
+//    }
+//}

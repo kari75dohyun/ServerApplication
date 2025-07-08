@@ -5,6 +5,7 @@
 #include <boost/asio.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/strand.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <memory>
 #include <string>
 #include <queue>
@@ -23,7 +24,7 @@ private:
     std::string line_buffer_; // 세션 멤버에 추가
     std::weak_ptr<DataHandler> data_handler_;  // DataHandler 포인터
 
-    std::atomic<bool> read_pending_{ false };   // 추가
+    std::atomic<bool> read_pending_{ false };   // 
 
     // ---- 직렬화 큐 관련 추가 ----
     std::queue<std::function<void()>> task_queue_;
@@ -31,7 +32,9 @@ private:
 
     MessageBufferManager msg_buf_mgr_; // 누적 버퍼
 
-    std::queue<std::string> write_queue_;    // write 메시지 큐
+    //std::queue<std::string> write_queue_;    // write 메시지 큐
+    std::queue<std::shared_ptr<std::string>> write_queue_;
+
     bool write_in_progress_ = false;         // 현재 write 중인지
 
     static constexpr size_t MAX_WRITE_QUEUE = 1000;
@@ -39,7 +42,22 @@ private:
 
     std::atomic<bool> closed_{ false };   // 중복 종료 방지 플래그 추가
 
-    boost::asio::ssl::context& ssl_context_;   // 추가!
+    boost::asio::ssl::context& ssl_context_;   // 
+
+    boost::asio::steady_timer login_timer_;   // 닉네임 입력 타이머
+    std::atomic<bool> nickname_registered_{ false };        // 닉네임 입력 상태 플래그
+
+	// keepalive 관련
+    //boost::asio::steady_timer ping_timer_;
+    //boost::asio::steady_timer keepalive_timer_;
+    //std::chrono::seconds ping_interval_{ 20 };
+    //std::chrono::seconds keepalive_timeout_{ 60 };
+
+    //void start_ping_sender();
+    //void start_keepalive_timer();
+
+	// 글로벌 keepalive 관련 => 클라 heartbeat 구조로 변경
+    std::atomic<std::chrono::steady_clock::time_point> last_alive_time_{};
 
 public:
     // 생성자: 클라이언트 소켓과 SSL 컨텍스트를 받아 SSL 스트림을 초기화
@@ -93,9 +111,27 @@ public:
     MessageBufferManager& get_msg_buffer() { return msg_buf_mgr_; }
 	// write 메시지 큐 관련 함수 (직렬화)
     void post_write(const std::string& msg);
+    void post_write(std::shared_ptr<std::string> msg); // 새 버전
 
 	// Session 재설정 함수
     void reset(boost::asio::ip::tcp::socket&& socket, int session_id);
+
+    void start_login_timeout();            // 닉네임 타이머 시작
+	void on_nickname_registered();         // 닉네임 등록 완료 콜백
+    bool is_nickname_registered() const { return nickname_registered_.load(); }
+
+	// keepalive 관련 추가
+    //void on_pong_received();
+
+	// 글로벌 keepalive 관련
+    void update_alive_time() {
+        last_alive_time_ = std::chrono::steady_clock::now();
+    }
+    std::chrono::steady_clock::time_point get_last_alive_time() const {
+        return last_alive_time_.load();
+    }
+
+    bool is_closed() const { return closed_.load(); }
 
 private:
     void do_write_queue();

@@ -1,5 +1,4 @@
 ﻿// ServerApplication.cpp : 이 파일에는 'main' 함수가 포함됩니다. 거기서 프로그램 실행이 시작되고 종료됩니다.
-//
 
 #include "SSLServer.h"
 #include "SSLSession.h"
@@ -20,28 +19,35 @@ using namespace boost::asio;
 constexpr size_t POOL_SIZE = 1024; // 원하는 값으로!
 
 int main() {
-    SetConsoleOutputCP(CP_UTF8);  // 출력
-    SetConsoleCP(CP_UTF8);        // 입력
-    setlocale(LC_ALL, "");        // 로케일 설정
+    //SetConsoleOutputCP(CP_UTF8);  // 출력
+    //SetConsoleCP(CP_UTF8);        // 입력
+    //setlocale(LC_ALL, "");        // 로케일 설정
     try {
+        // 1. io_context 준비
         boost::asio::io_context io;
-        ssl::context context(ssl::context::tlsv12);
 
+        // 2. SSL context, 기타 준비
+        ssl::context context(ssl::context::tlsv12);
         context.use_certificate_chain_file("D://Study//Boost_MulitThread_Strand_Parallel_SSL//x64//Debug//server.pem");
         context.use_private_key_file("D://Study//Boost_MulitThread_Strand_Parallel_SSL//x64//Debug//server.key", ssl::context::pem);
 
+        // 3. DataHandler 인스턴스 생성 (io를 전달)
         // DataHandler 객체 생성 및 공유 포인터로 관리
-        auto data_handler = std::make_shared<DataHandler>();
-        auto session_pool = std::make_shared<SessionPool>(POOL_SIZE, io, context, data_handler);
+        auto data_handler = std::make_shared<DataHandler>(io);
 
+        // 4. 세션풀, 서버 등 생성
+        auto session_pool = std::make_shared<SessionPool>(POOL_SIZE, io, context, data_handler);
         SSLServer server(io, 12345, context, data_handler, session_pool);
 
+        // 5. === 여기에서 글로벌 keepalive 타이머 루프 시작 ===
+		//data_handler->start_keepalive_loop();  // 클라가 하트비트 보내는 구조로 변경됨 DataHandler 생성자에서 호출해버림
 
+        // 6. UDP 등 기타 서버 준비
 		UDPManager udp_manager(io, 54321, data_handler); // UDP 매니저 생성
-        //auto udp_server = std::make_shared<UDPManager>(io, 54321); // 예: 54321 포트
 
         cout << "SSL Echo Server started on port 12345" << endl;
 
+        // 7. 스레드 풀 및 io.run()
         size_t thread_count = std::thread::hardware_concurrency();
         if (thread_count == 0) thread_count = 4;
         cout << "Thread count: " << thread_count << endl;

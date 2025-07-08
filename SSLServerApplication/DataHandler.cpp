@@ -9,10 +9,14 @@ using namespace std;
 using namespace boost::asio;
 using boost::asio::ip::udp;
 
-DataHandler::DataHandler()
+DataHandler::DataHandler(boost::asio::io_context& io)
     : shard_count(std::max(4u, std::thread::hardware_concurrency() * 2)),
     session_buckets(shard_count),
-    session_mutexes(shard_count), dispatcher_(this) {
+    session_mutexes(shard_count), 
+    dispatcher_(this),
+    // 글로벌 keepalive 관련 타이머 초기화
+    keepalive_timer_(io)  {
+    start_keepalive_loop();  // 생성자에서 타이머 시작
 }
 
 void DataHandler::add_session(int session_id, std::shared_ptr<SSLSession> session) {
@@ -45,12 +49,12 @@ void DataHandler::remove_session(int session_id) {
         }
     }
     // 락을 풀고 나서 release를 호출 (컨테이너/락과 완전히 분리)
-    if (session) {
-        auto pool = get_session_pool();
-        if (pool) {
-            pool->release(session);
-        }
+if (session && !session->is_closed()) {  // 중복 반환 방지!
+    auto pool = get_session_pool();
+    if (pool) {
+        pool->release(session);
     }
+}
 }
 
 shared_ptr<SSLSession> DataHandler::get_session(int session_id) {
@@ -108,7 +112,7 @@ void DataHandler::do_read(shared_ptr<SSLSession> session) {
                         // 2. 여러 메시지 추출 및 처리
                         while (auto opt_msg = self->get_msg_buffer().extract_message()) {
                             try {
-                                std::cout << "[DEBUG] dispatching message" << std::endl;
+                                //std::cout << "[DEBUG] dispatching message" << std::endl;
                                 json msg = json::parse(*opt_msg);
                                 dispatcher_.dispatch(self, msg);
                             }
@@ -151,6 +155,11 @@ void DataHandler::do_read(shared_ptr<SSLSession> session) {
 
                         self->close_session();
                     }
+                    else if (ec == boost::asio::error::operation_aborted) {
+                        // [995] 소켓 종료, 타이머 취소 등에서 발생하는 "정상 종료 케이스"
+                        //std::cout << "[INFO] Read cancelled by server shutdown or session close." << std::endl;
+                        // 로그를 아예 안 찍거나, INFO/DEBUG로만 출력
+                    }
                     else {
                         std::cerr << "Read failed: [" << ec.value() << "] " << ec.message() << std::endl;
                         self->close_session();
@@ -168,6 +177,7 @@ void DataHandler::do_read(shared_ptr<SSLSession> session) {
 }
 
 void DataHandler::broadcast(const std::string& msg, int sender_session_id, std::shared_ptr<SSLSession> /*session*/) {
+    auto shared_msg = std::make_shared<std::string>(msg);
     std::vector<std::shared_ptr<SSLSession>> targets;
 
     // 1. 각 샤드별로 lock (세션 포인터만 복사)
@@ -175,6 +185,7 @@ void DataHandler::broadcast(const std::string& msg, int sender_session_id, std::
         std::lock_guard<std::mutex> lock(session_mutexes[shard]);
         for (const auto& [id, sess] : session_buckets[shard]) {
             if (sess && id != sender_session_id) {
+                if(sess->get_nickname().empty()) continue;
                 targets.push_back(sess);
             }
         }
@@ -186,13 +197,43 @@ void DataHandler::broadcast(const std::string& msg, int sender_session_id, std::
             std::cout << "[broadcast] target session_id=" << sess->get_session_id()
                 << " (sender_session_id=" << sender_session_id << ")" << std::endl;
 
-            sess->post_write(msg);  // <--- write 직렬화 큐 진입점
+            sess->post_write(shared_msg);  // <--- 모든 세션이 같은 메시지 객체를 참조!
         }
         catch (const std::exception& e) {
             std::cerr << "[broadcast] Exception scheduling broadcast: " << e.what() << std::endl;
         }
     }
 }
+
+
+//void DataHandler::broadcast(const std::string& msg, int sender_session_id, std::shared_ptr<SSLSession> /*session*/) {
+//    std::vector<std::shared_ptr<SSLSession>> targets;
+//
+//    // 1. 각 샤드별로 lock (세션 포인터만 복사)
+//    for (unsigned int shard = 0; shard < shard_count; ++shard) {
+//        std::lock_guard<std::mutex> lock(session_mutexes[shard]);
+//        for (const auto& [id, sess] : session_buckets[shard]) {
+//            if (sess && id != sender_session_id) {
+//                // [여기!] 닉네임 없는 세션(아직 로그인 전)은 건너뜀
+//                if (sess->get_nickname().empty()) continue;
+//                targets.push_back(sess);
+//            }
+//        }
+//    }
+//
+//    // 2. 락 해제 후 각 세션에 post_write로 write 작업 직렬화
+//    for (auto& sess : targets) {
+//        try {
+//            std::cout << "[broadcast] target session_id=" << sess->get_session_id()
+//                << " (sender_session_id=" << sender_session_id << ")" << std::endl;
+//
+//            sess->post_write(msg);  // <--- write 직렬화 큐 진입점
+//        }
+//        catch (const std::exception& e) {
+//            std::cerr << "[broadcast] Exception scheduling broadcast: " << e.what() << std::endl;
+//        }
+//    }
+//}
 
 // UDP 메시지 수신 처리
 void DataHandler::on_udp_receive(const std::string& msg, const udp::endpoint& from, udp::socket& udp_socket) {
@@ -285,29 +326,102 @@ size_t DataHandler::get_total_session_count() {
     return total;
 }
 
-// (샤드 전체 락 + 일관된 순회)
-template<typename Func>
-void DataHandler::for_each_session(Func&& func) {
-    // 1. 모든 샤드 lock (deadlock 방지: 항상 0~N순)
-    std::vector<std::unique_lock<std::mutex>> locks;
-    locks.reserve(shard_count);
-    for (unsigned int shard = 0; shard < shard_count; ++shard) {
-        locks.emplace_back(session_mutexes[shard]);
-    }
-
-    // 2. 전체 세션 순회
-    for (unsigned int shard = 0; shard < shard_count; ++shard) {
-        for (const auto& [id, sess] : session_buckets[shard]) {
-            func(sess);
-        }
-    }
-    // 3. lock 자동 해제(스코프 종료)
-}
+//// (샤드 전체 락 + 일관된 순회)
+//template<typename Func>
+//void DataHandler::for_each_session(Func&& func) {
+//    // 1. 모든 샤드 lock (deadlock 방지: 항상 0~N순)
+//    std::vector<std::unique_lock<std::mutex>> locks;
+//    locks.reserve(shard_count);
+//    for (unsigned int shard = 0; shard < shard_count; ++shard) {
+//        locks.emplace_back(session_mutexes[shard]);
+//    }
+//
+//    // 2. 전체 세션 순회
+//    for (unsigned int shard = 0; shard < shard_count; ++shard) {
+//        for (const auto& [id, sess] : session_buckets[shard]) {
+//            func(sess);
+//        }
+//    }
+//    // 3. lock 자동 해제(스코프 종료)
+//}
 
 // DataHandler.cpp 또는 외부에서
 // 긴급 서버공지, 전원강제알림 등 필요할 때
+//void DataHandler::broadcast_strict(const std::string& msg) {
+//    for_each_session([msg, this](const std::shared_ptr<SSLSession>& sess) {
+//        if (sess) sess->post_write(msg);
+//        });
+//}
+
 void DataHandler::broadcast_strict(const std::string& msg) {
-    for_each_session([msg, this](const std::shared_ptr<SSLSession>& sess) {
-        if (sess) sess->post_write(msg);
+    auto shared_msg = std::make_shared<std::string>(msg);
+    for_each_session([shared_msg](const std::shared_ptr<SSLSession>& sess) {
+        if (sess) sess->post_write(shared_msg);
         });
+}
+
+void DataHandler::register_nickname(const std::string& nickname, std::shared_ptr<SSLSession> session) {
+    std::lock_guard<std::mutex> lock(nickname_mutex_);
+    nickname_to_session_[nickname] = session;
+}
+void DataHandler::unregister_nickname(const std::string& nickname, std::shared_ptr<SSLSession> session) {
+    std::lock_guard<std::mutex> lock(nickname_mutex_);
+    auto it = nickname_to_session_.find(nickname);
+    if (it != nickname_to_session_.end()) {
+        // 세션 포인터 일치 시에만 제거
+        if (!it->second.expired() && it->second.lock() == session)
+            nickname_to_session_.erase(it);
+    }
+}
+std::shared_ptr<SSLSession> DataHandler::find_session_by_nickname(const std::string& nickname) {
+    std::lock_guard<std::mutex> lock(nickname_mutex_);
+    auto it = nickname_to_session_.find(nickname);
+    if (it != nickname_to_session_.end()) {
+        return it->second.lock();
+    }
+    return nullptr;
+}
+
+// 글로벌 keepalive 관련 함수
+void DataHandler::start_keepalive_loop() {
+    keepalive_timer_.expires_after(std::chrono::seconds(keepalive_timeout_));
+    keepalive_timer_.async_wait([this](const boost::system::error_code& ec) {
+        if (!ec) {
+            do_keepalive_check();
+            start_keepalive_loop(); // 반복
+        }
+        });
+}
+
+// 글로벌 keepalive 체크
+void DataHandler::do_keepalive_check() {
+    auto now = std::chrono::steady_clock::now();
+
+    // 1. close해야 할 세션을 임시로 모아둘 벡터
+    std::vector<std::shared_ptr<SSLSession>> sessions_to_close;
+
+    for_each_session([this, now, &sessions_to_close](std::shared_ptr<SSLSession> sess) {
+        if (!sess) return;
+
+        if (sess->is_nickname_registered() == false) return; // 닉네임 등록 안된 세션은 skip
+
+        // 클라가 하트비트 보내는 걸로 변경 되어서 삭제
+        //// 1. ping 보내기 (ping_interval_ 간격마다)
+        //if ((now - sess->get_last_alive_time()) > ping_interval_) {
+        //    std::cout << "[PING] session_id=" << sess->get_session_id() << std::endl;
+        //    sess->post_write(R"({"type":"ping"})" "\n");
+        //}
+
+        // 2. keepalive 타임아웃 체크
+        if ((now - sess->get_last_alive_time()) > keepalive_timeout_) {
+            // 여기서 직접 close_session() 하지 말고, 임시 벡터에 push!
+            sessions_to_close.push_back(sess);
+        }
+        });
+
+    // 2. 락 해제 후(즉, 세션 안전하게 순회 후) 실제 close_session 호출
+    for (auto& sess : sessions_to_close) {
+        std::cout << "[KEEPALIVE TIMEOUT] session_id=" << sess->get_session_id() << " - close session" << std::endl;
+        sess->close_session();
+    }
 }
