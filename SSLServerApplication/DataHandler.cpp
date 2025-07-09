@@ -13,10 +13,10 @@ using boost::asio::ip::udp;
 DataHandler::DataHandler(boost::asio::io_context& io)
     : shard_count(std::max(4u, std::thread::hardware_concurrency() * 2)),
     session_buckets(shard_count),
-    session_mutexes(shard_count), 
+    session_mutexes(shard_count),
     dispatcher_(this),
     // 글로벌 keepalive 관련 타이머 초기화
-    keepalive_timer_(io)  {
+    keepalive_timer_(io) {
     start_keepalive_loop();  // 생성자에서 타이머 시작
 }
 
@@ -31,7 +31,7 @@ void DataHandler::add_session(int session_id, std::shared_ptr<SSLSession> sessio
         if (it->second) it->second->close_session();
         session_buckets[shard].erase(it);
     }
-	// 중복 검사 후 세션 추가
+    // 중복 검사 후 세션 추가
     session_buckets[shard][session_id] = session;
     //LOG_INFO("[add_session] session_id=", session_id, " added to shard ", shard);
 
@@ -184,8 +184,8 @@ void DataHandler::do_read(shared_ptr<SSLSession> session) {
                 self->run_next_task(); // 항상 마지막에!
 
                 })
-            );
-    });
+        );
+        });
 }
 
 void DataHandler::broadcast(const std::string& msg, int sender_session_id, std::shared_ptr<SSLSession> /*session*/) {
@@ -197,7 +197,7 @@ void DataHandler::broadcast(const std::string& msg, int sender_session_id, std::
         std::lock_guard<std::mutex> lock(session_mutexes[shard]);
         for (const auto& [id, sess] : session_buckets[shard]) {
             if (sess && id != sender_session_id) {
-                if(sess->get_nickname().empty()) continue;
+                if (sess->get_nickname().empty()) continue;
                 targets.push_back(sess);
             }
         }
@@ -250,7 +250,6 @@ size_t DataHandler::get_total_session_count() {
     return total;
 }
 
-// DataHandler.cpp 또는 외부에서
 // 긴급 서버공지, 전원강제알림 등 필요할 때
 void DataHandler::broadcast_strict(const std::string& msg) {
     auto shared_msg = std::make_shared<std::string>(msg);
@@ -338,7 +337,8 @@ void DataHandler::on_udp_receive(const std::string& msg, const udp::endpoint& fr
             session = find_session_by_nickname(nickname);
             if (session) session->set_udp_endpoint(from);
         }
-    }   catch (const std::exception& e) {
+    }
+    catch (const std::exception& e) {
         // JSON 파싱 실패 시, 원래 메시지 그대로 에코
         g_logger->info("[UDP] JSON Parse failed: {}", e.what(), " / original: {}", msg);
         std::string response = "Echo(UDP): " + msg;
