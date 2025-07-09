@@ -17,23 +17,40 @@ void UDPManager::start_receive() {
                 auto msg = std::make_shared<std::string>(buffer_.data(), bytes_recvd);
 
                 if (auto handler = data_handler_.lock()) {
-                    // Echo 응답 문자열을 미리 생성
-                    auto response = std::make_shared<std::string>("Echo(UDP): " + *msg);
-
-                    std::cout << "[UDP] Received from " << remote_endpoint_.address().to_string()
-                        << ":" << remote_endpoint_.port()
-                        << " - " << *msg << std::endl;
-
-                    socket_.async_send_to(
-                        boost::asio::buffer(*response), remote_endpoint_,
-                        [response](const boost::system::error_code& send_ec, std::size_t) {
-                            if (send_ec) {
-                                std::cerr << "[UDP] Send error: " << send_ec.message() << std::endl;
-                            }
-                        });
+                    // 예시: 클라이언트가 {"type":"broadcast_udp", ...}로 보내면 전체 브로드캐스트
+                    try {
+                        auto jmsg = nlohmann::json::parse(*msg);
+                        if (jmsg.value("type", "") == "broadcast_udp") {
+                            // 전체 유저에게 UDP 브로드캐스트
+                            handler->udp_broadcast(*msg, socket_);
+                        }
+                        else {
+                            handler->on_udp_receive(*msg, remote_endpoint_, socket_);
+                        }
+                    }
+                    catch (...) {
+                        handler->on_udp_receive(*msg, remote_endpoint_, socket_);
+                    }
                 }
             }
             // 항상 다시 수신 대기
             start_receive();
         });
 }
+
+//void UDPManager::start_receive() {
+//    socket_.async_receive_from(
+//        boost::asio::buffer(buffer_), remote_endpoint_,
+//        [this](const boost::system::error_code& ec, std::size_t bytes_recvd) {
+//            if (!ec && bytes_recvd > 0) {
+//                auto msg = std::make_shared<std::string>(buffer_.data(), bytes_recvd);
+//
+//                if (auto handler = data_handler_.lock()) {
+//                    // 실제 메시지 처리 및 응답 전송은 DataHandler에 맡김
+//                    handler->on_udp_receive(*msg, remote_endpoint_, socket_);
+//                }
+//            }
+//            // 항상 다시 수신 대기
+//            start_receive();
+//        });
+//}
