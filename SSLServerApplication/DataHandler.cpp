@@ -335,7 +335,10 @@ void DataHandler::on_udp_receive(const std::string& msg, const udp::endpoint& fr
         nickname = j.value("nickname", "");
         if (!nickname.empty()) {
             session = find_session_by_nickname(nickname);
-            if (session) session->set_udp_endpoint(from);
+            if (session) {
+                session->set_udp_endpoint(from);
+				g_logger->info("[UDP] EndPoint registe from nickname: {}", nickname);
+            }
         }
     }
     catch (const std::exception& e) {
@@ -357,9 +360,12 @@ void DataHandler::on_udp_receive(const std::string& msg, const udp::endpoint& fr
     dispatcher_.dispatch_udp(session, msg, from, udp_socket);
 }
 
-void DataHandler::udp_broadcast(const std::string& msg, udp::socket& udp_socket) {
+void DataHandler::udp_broadcast(const std::string& msg, udp::socket& udp_socket, const std::string& sender_nickname) {
     for_each_session([&](std::shared_ptr<SSLSession> sess) {
         if (!sess) return;
+        if (sess->get_nickname().empty()) return;
+        if (sess->get_nickname() == sender_nickname) return; // 자기자신 제외
+
         auto udp_ep = sess->get_udp_endpoint();
         if (udp_ep) {
             auto data = std::make_shared<std::string>(msg);
@@ -372,3 +378,31 @@ void DataHandler::udp_broadcast(const std::string& msg, udp::socket& udp_socket)
         }
         });
 }
+
+// 미인증 세션 정리 함수 
+void DataHandler::cleanup_unauth_sessions(size_t max_unauth) {
+    std::vector<std::shared_ptr<SSLSession>> unauth_sessions;
+
+    for_each_session([&](std::shared_ptr<SSLSession> sess) {
+        if (!sess) return;
+        SessionState state = sess->get_state();
+        if (state == SessionState::Handshaking || state == SessionState::LoginWait) {
+            unauth_sessions.push_back(sess);
+        }
+        });
+
+    // 임계치 초과시, 오래된 세션부터 정리 (예: 타임스탬프 기준 정렬)
+    if (unauth_sessions.size() > max_unauth) {
+        // 오래된 순으로 정렬 (예: get_last_alive_time() 활용)
+        std::sort(unauth_sessions.begin(), unauth_sessions.end(),
+            [](const auto& a, const auto& b) {
+                return a->get_last_alive_time() < b->get_last_alive_time();
+            });
+
+        size_t count_to_close = unauth_sessions.size() - max_unauth;
+        for (size_t i = 0; i < count_to_close; ++i) {
+            unauth_sessions[i]->close_session();
+        }
+    }
+}
+

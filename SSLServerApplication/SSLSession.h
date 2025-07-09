@@ -20,6 +20,7 @@ class SSLSession : public std::enable_shared_from_this<SSLSession> {
 private:
     static constexpr size_t MAX_WRITE_QUEUE = 1000;
     static constexpr size_t MAX_TASK_QUEUE = 1000;
+    static constexpr int LOGIN_TIMEOUT_SECONDS = 30;  // 로그인 제한(초)
 
     boost::asio::ssl::stream<boost::asio::ip::tcp::socket> socket_;  // SSL 스트림을 사용한 소켓
     boost::asio::strand<boost::asio::any_io_executor> strand_;       // 수정된 strand_ 타입
@@ -55,7 +56,9 @@ private:
     // 글로벌 keepalive 관련 => 클라 heartbeat 구조로 변경
     std::atomic<std::chrono::steady_clock::time_point> last_alive_time_{};
     SessionState state_ = SessionState::Handshaking;                 // 초기값 Handshaking
+	// UDP 엔드포인트
     std::optional<boost::asio::ip::udp::endpoint> udp_endpoint_;
+    std::chrono::steady_clock::time_point udp_ep_update_time_{};
 
 public:
     // 생성자: 클라이언트 소켓과 SSL 컨텍스트를 받아 SSL 스트림을 초기화
@@ -136,8 +139,16 @@ public:
     // 상태 설정 (필요하면 public, 아니라면 protected/private로)
     void set_state(SessionState s) { state_ = s; }
 
-    void set_udp_endpoint(const boost::asio::ip::udp::endpoint& ep) { udp_endpoint_ = ep; }
+    void set_udp_endpoint(const boost::asio::ip::udp::endpoint& ep) { 
+        udp_endpoint_ = ep;
+        udp_ep_update_time_ = std::chrono::steady_clock::now();
+    }
     std::optional<boost::asio::ip::udp::endpoint> get_udp_endpoint() const { return udp_endpoint_; }
+    std::chrono::steady_clock::time_point get_udp_ep_update_time() const { return udp_ep_update_time_; }
+    void clear_udp_endpoint() { udp_endpoint_.reset(); }
+
+	std::string get_client_ip() const;      // 클라이언트 IP 주소를 가져오는 함수
+	unsigned short get_client_port() const; // 클라이언트 포트를 가져오는 함수
 private:
     void do_write_queue();
 

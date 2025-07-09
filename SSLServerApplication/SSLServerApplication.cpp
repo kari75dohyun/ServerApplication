@@ -77,6 +77,7 @@ int main() {
 
         for (auto& t : threads)
             t.join();
+
     }
     catch (const std::exception& e) {
         cerr << "Exception: " << e.what() << endl;

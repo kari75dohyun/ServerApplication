@@ -1,12 +1,23 @@
 ﻿#include "UDPManager.h"
 #include "DataHandler.h"
 #include <iostream>
+#include "Logger.h"
 
 using boost::asio::ip::udp;
 
 UDPManager::UDPManager(boost::asio::io_context& io, unsigned short port, std::shared_ptr<DataHandler> data_handler)
     : socket_(io, udp::endpoint(udp::v4(), port)), data_handler_(data_handler) {
     start_receive();
+}
+
+UDPManager::~UDPManager() {
+    if (socket_.is_open()) {
+        boost::system::error_code ec;
+        socket_.close(ec);
+        if (ec) {
+            g_logger->error("[UDPManager] 소멸자에서 udp 소켓 close 에러:  {}", ec.message());
+        }
+    }
 }
 
 void UDPManager::start_receive() {
@@ -20,9 +31,11 @@ void UDPManager::start_receive() {
                     // 예시: 클라이언트가 {"type":"broadcast_udp", ...}로 보내면 전체 브로드캐스트
                     try {
                         auto jmsg = nlohmann::json::parse(*msg);
+                      
                         if (jmsg.value("type", "") == "broadcast_udp") {
                             // 전체 유저에게 UDP 브로드캐스트
-                            handler->udp_broadcast(*msg, socket_);
+                            std::string sender_nickname = jmsg.value("nickname", "");
+                            handler->udp_broadcast(*msg, socket_, sender_nickname);
                         }
                         else {
                             handler->on_udp_receive(*msg, remote_endpoint_, socket_);
@@ -36,6 +49,14 @@ void UDPManager::start_receive() {
             // 항상 다시 수신 대기
             start_receive();
         });
+}
+
+void UDPManager::close() {
+    boost::system::error_code ec;
+    socket_.close(ec);
+    if (ec) {
+        g_logger->error("[UDPManager] udp socket close error : {}", ec.message());
+    }
 }
 
 //void UDPManager::start_receive() {

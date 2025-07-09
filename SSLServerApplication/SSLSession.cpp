@@ -90,18 +90,21 @@ void SSLSession::close_session() {
         socket_.async_shutdown(
             boost::asio::bind_executor(strand_,
                 [this, self](const boost::system::error_code& ec) {
-                    if (ec) {
+                    if (ec && ec != boost::asio::error::eof) {
                         //std::cerr << "[close_session] async_shutdown error: " << ec.message() << std::endl;
                         //LOG_ERROR("[close_session] async_shutdown error: ", ec.message());
                         g_logger->error("[close_session] async_shutdown error: {}", ec.message());
                     }
-
                     // TCP 소켓 안전하게 닫기
                     boost::system::error_code ec2;
                     socket_.lowest_layer().shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec2);
-                    if (ec2) g_logger->error("[close_session] tcp shutdown error: {}", ec2.message()); //LOG_ERROR("[close_session] tcp shutdown error: ", ec2.message());  //std::cerr << "[close_session] tcp shutdown error: " << ec2.message() << std::endl;
+                    if (ec2) {
+                        g_logger->error("[close_session] tcp shutdown error: {}", ec2.message()); //LOG_ERROR("[close_session] tcp shutdown error: ", ec2.message());  //std::cerr << "[close_session] tcp shutdown error: " << ec2.message() << std::endl;
+                    }
                     socket_.lowest_layer().close(ec2);
-                    if (ec2) g_logger->error("[close_session] tcp close error: {}", ec2.message()); //LOG_ERROR("[close_session] tcp close error: ", ec2.message());//std::cerr << "[close_session] tcp close error: " << ec2.message() << std::endl;
+                    if (ec2) {
+                        g_logger->error("[close_session] tcp close error: {}", ec2.message()); //LOG_ERROR("[close_session] tcp close error: ", ec2.message());//std::cerr << "[close_session] tcp close error: " << ec2.message() << std::endl;
+                    }
 
                     // ⭐️ remove_session을 마지막에 호출 (release 등 포함)
                     if (auto handler = data_handler_.lock()) {
@@ -172,7 +175,7 @@ void SSLSession::start_login_timeout() {
         g_logger->warn("Closed session: 콜백/메시지 무시 [session_id={}]", get_session_id());
         return;
     }
-    login_timer_.expires_after(std::chrono::seconds(90)); // 예: 90초
+    login_timer_.expires_after(std::chrono::seconds(LOGIN_TIMEOUT_SECONDS)); // 예: 90초
     auto self = shared_from_this();
     login_timer_.async_wait([this, self](const boost::system::error_code& ec) {
         if (!ec && !nickname_registered_) {
@@ -250,4 +253,22 @@ void SSLSession::reset(boost::asio::ip::tcp::socket&& new_socket, int session_id
     set_state(SessionState::Handshaking);   // 새로운 세션 시작시 항상 초기 상태로!
     // (5) 타이머, 버퍼, 큐 등 모두 초기화 (필요시)
     // ...
+}
+
+std::string SSLSession::get_client_ip() const {
+    try {
+        return socket_.lowest_layer().remote_endpoint().address().to_string();
+    }
+    catch (const std::exception& e) {
+        return "unknown";
+    }
+}
+
+unsigned short SSLSession::get_client_port() const {
+    try {
+        return socket_.lowest_layer().remote_endpoint().port();
+    }
+    catch (const std::exception& e) {
+        return 0;
+    }
 }

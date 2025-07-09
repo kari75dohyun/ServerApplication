@@ -76,6 +76,13 @@ MessageDispatcher::MessageDispatcher(DataHandler* handler) : handler_(handler) {
         // session->post_write(R"({"type":"pong"})" "\n");
         });
 
+    register_handler("udp_register", [this](std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {
+        // 닉네임과 endpoint는 on_udp_receive에서 이미 처리됨. 추가로 할 일이 없다면 로그만!
+        std::string nickname = msg.value("nickname", "");
+        if (nickname.empty()) return;
+        g_logger->info("[UDP] udp_register received for nickname: {}", nickname);
+        // 필요하다면 별도 응답도 가능!
+        });
 }
 
 void MessageDispatcher::dispatch(std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {
@@ -128,11 +135,25 @@ void MessageDispatcher::dispatch_udp(std::shared_ptr<SSLSession> session, const 
         );
     }
     else if (type == "broadcast_udp") {
-        // 전체 세션에 udp로 broadcast (DataHandler 활용)
         if (handler_) {
-            // 예시: DataHandler의 udp_broadcast 사용
-            handler_->udp_broadcast(raw_msg, udp_socket);
+            std::string sender_nickname = jmsg.value("nickname", "");
+            handler_->udp_broadcast(raw_msg, udp_socket, sender_nickname);
         }
+    }
+    else if (type == "udp_register") {
+        // 별도 응답 필요시 이 곳에서 UDP로 전송
+        nlohmann::json response;
+        response["type"] = "udp_register_ack";
+        response["msg"] = "UDP endpoint registered";
+        response["nickname"] = jmsg.value("nickname", "anonymity");
+
+        auto data = std::make_shared<std::string>(response.dump());
+        udp_socket.async_send_to(
+            boost::asio::buffer(*data), from,
+            [data](const boost::system::error_code& ec, std::size_t bytes) {
+                if (ec) g_logger->warn("[UDP][send_to callback] Error: {}", ec.message());
+            }
+        );
     }
     else {
         // 기타 타입 기본 에코

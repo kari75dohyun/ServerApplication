@@ -110,5 +110,8 @@ public:
     void start_keepalive_loop();
     void do_keepalive_check();
 
-    void udp_broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket);
+    void udp_broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname);
+
+	// 로그인 하지 않고 DDos 공격하는 세션 정리
+    void cleanup_unauth_sessions(size_t max_unauth); // 미인증 세션 정리
 };

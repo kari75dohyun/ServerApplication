@@ -8,8 +8,10 @@ class DataHandler; // 전방 선언
 class UDPManager {
 public:
     UDPManager(boost::asio::io_context& io, unsigned short port, std::shared_ptr<DataHandler> data_handler);
+    ~UDPManager();
 
     void start_receive();
+    void close();
 
 private:
     boost::asio::ip::udp::socket socket_;
