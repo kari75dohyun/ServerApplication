@@ -20,9 +20,12 @@ constexpr size_t POOL_SIZE = 1024; // 원하는 값으로!
 constexpr size_t MAX_POOL_SIZE = 10000;  // session 풀을 1024개가 넘으면 자동 증가 하지만, max 사이즈 만큼은 못넘게 한다.
 
 int main() {
-    SetConsoleOutputCP(CP_UTF8);  // 출력
-    SetConsoleCP(CP_UTF8);        // 입력
-    setlocale(LC_ALL, "");        // 로케일 설정
+    init_logger();
+
+    auto logger = spdlog::get("server");
+
+    g_logger->info("=== 서버 시작! ===");
+
     try {
         // 1. io_context 준비
         boost::asio::io_context io;
@@ -34,16 +37,17 @@ int main() {
 
         // 3. DataHandler 인스턴스 생성 (io를 전달)
         // DataHandler 객체 생성 및 공유 포인터로 관리
-        auto data_handler = std::make_shared<DataHandler>();
-        auto session_pool = std::make_shared<SessionPool>(POOL_SIZE, io, context, data_handler);
+        auto data_handler = std::make_shared<DataHandler>(io);
 
+        // 4. 세션풀, 서버 등 생성
+        auto session_pool = std::make_shared<SessionPool>(POOL_SIZE, MAX_POOL_SIZE, io, context, data_handler);
         SSLServer server(io, 12345, context, data_handler, session_pool);
 
         // 5. === 여기에서 글로벌 keepalive 타이머 루프 시작 ===
-		//data_handler->start_keepalive_loop();  // 클라가 하트비트 보내는 구조로 변경됨 DataHandler 생성자에서 호출해버림
+        //data_handler->start_keepalive_loop();  // 클라가 하트비트 보내는 구조로 변경됨 DataHandler 생성자에서 호출해버림
 
         // 6. UDP 등 기타 서버 준비
-		UDPManager udp_manager(io, 54321, data_handler); // UDP 매니저 생성
+        UDPManager udp_manager(io, 54321, data_handler); // UDP 매니저 생성
 
         cout << "SSL Echo Server started on port 12345" << endl;
         //LOG_INFO("SSL Echo Server started on port 12345");

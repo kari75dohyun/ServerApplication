@@ -29,7 +29,7 @@ private:
     std::unordered_map<std::string, std::weak_ptr<SSLSession>> nickname_to_session_;  // 닉네임→세션
     std::mutex nickname_mutex_; // 닉네임 맵 보호용
 
-	// 글로벌 keepalive 관련
+    // 글로벌 keepalive 관련
     boost::asio::steady_timer keepalive_timer_;
     //std::chrono::seconds ping_interval_ = std::chrono::seconds(20);     // ping 보낼 주기
     std::chrono::seconds keepalive_timeout_ = std::chrono::seconds(60); // pong 없을때 세션 끊는 시간
@@ -60,10 +60,10 @@ public:
     // 데이터 쓰기
     //void do_write(std::shared_ptr<SSLSession> session);
 
-	// 브로드캐스트 메시지 전송
+    // 브로드캐스트 메시지 전송
     void broadcast(const std::string& msg, int sender_session_id, std::shared_ptr<SSLSession> session);
 
-	// UDP 메시지 수신 처리
+    // UDP 메시지 수신 처리
     void on_udp_receive(const std::string& msg, const boost::asio::ip::udp::endpoint& from,
         boost::asio::ip::udp::socket& udp_socket);
 
@@ -101,4 +101,14 @@ public:
     void set_session_pool(std::shared_ptr<SessionPool> pool) {
         session_pool_ = std::move(pool);
     }
+
+    void register_nickname(const std::string& nickname, std::shared_ptr<SSLSession> session);
+    void unregister_nickname(const std::string& nickname, std::shared_ptr<SSLSession> session);
+    std::shared_ptr<SSLSession> find_session_by_nickname(const std::string& nickname);
+
+    // 글로벌 keepalive 관련
+    void start_keepalive_loop();
+    void do_keepalive_check();
+
+    void udp_broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket);
 };
