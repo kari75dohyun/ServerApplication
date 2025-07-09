@@ -101,14 +101,4 @@ public:
     void set_session_pool(std::shared_ptr<SessionPool> pool) {
         session_pool_ = std::move(pool);
     }
-
-    void register_nickname(const std::string& nickname, std::shared_ptr<SSLSession> session);
-    void unregister_nickname(const std::string& nickname, std::shared_ptr<SSLSession> session);
-    std::shared_ptr<SSLSession> find_session_by_nickname(const std::string& nickname);
-
-	// 글로벌 keepalive 관련
-    void start_keepalive_loop();
-    void do_keepalive_check();
-
-    void udp_broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket);
 };
