@@ -4,6 +4,7 @@
 #include <iostream>
 #include "Logger.h"
 #include <memory>
+#include "Utility.h"
 //#include <fstream>
 
 MessageDispatcher::MessageDispatcher(DataHandler* handler) : handler_(handler) {
@@ -21,6 +22,10 @@ MessageDispatcher::MessageDispatcher(DataHandler* handler) : handler_(handler) {
 
         session->set_nickname(nickname);
         session->on_nickname_registered(); // 닉네임 등록시 타이머 중지
+
+        // zone 배정
+        int default_zone = 1; // 정책에 따라 1번 존에 자동 배정
+        handler_->assign_session_to_zone(session, default_zone);
 
         nlohmann::json notice;
         notice["type"] = "notice";
@@ -76,13 +81,23 @@ MessageDispatcher::MessageDispatcher(DataHandler* handler) : handler_(handler) {
         // session->post_write(R"({"type":"pong"})" "\n");
         });
 
-    register_handler("udp_register", [this](std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {
-        // 닉네임과 endpoint는 on_udp_receive에서 이미 처리됨. 추가로 할 일이 없다면 로그만!
-        std::string nickname = msg.value("nickname", "");
-        if (nickname.empty()) return;
-        g_logger->info("[UDP] udp_register received for nickname: {}", nickname);
-        // 필요하다면 별도 응답도 가능!
-        });
+    //register_handler("udp_register", [this](std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {
+    //    // 닉네임과 endpoint는 on_udp_receive에서 이미 처리됨. 추가로 할 일이 없다면 로그만!
+    //    std::string nickname = msg.value("nickname", "");
+    //    if (nickname.empty()) return;
+    //    g_logger->info("[UDP] udp_register received for nickname: {}", nickname);
+    //    // 필요하다면 별도 응답도 가능!
+    //        // 랜덤 토큰 생성 및 저장
+    //    std::string udp_token = generate_random_token();
+    //    session->set_udp_token(udp_token);
+
+    //    // 클라이언트에 토큰 전달
+    //    nlohmann::json response;
+    //    response["type"] = "udp_token";
+    //    response["token"] = udp_token;
+    //    response["msg"] = "UDP 인증 토큰 발급";
+    //    session->post_write(response.dump() + "\n");
+    //    });
 }
 
 void MessageDispatcher::dispatch(std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {
@@ -125,11 +140,12 @@ void MessageDispatcher::dispatch_udp(std::shared_ptr<SSLSession> session, const 
         response["nickname"] = jmsg.value("nickname", "anonymity");
 
         auto data = std::make_shared<std::string>(response.dump());
+        std::string nickname = jmsg.value("nickname", "anonymity");
         udp_socket.async_send_to(
             boost::asio::buffer(*data), from,
-            [data](const boost::system::error_code& ec, std::size_t bytes) {
+            [data, nickname](const boost::system::error_code& ec, std::size_t bytes) {
                 if (ec) {
-                    g_logger->warn("[UDP][send_to callback] Error: {}", ec.message());
+                    g_logger->warn("[UDP][send_to callback] Error 4: {} {}", nickname, ec.message());
                 }
             }
         );
@@ -142,26 +158,64 @@ void MessageDispatcher::dispatch_udp(std::shared_ptr<SSLSession> session, const 
     }
     else if (type == "udp_register") {
         // 별도 응답 필요시 이 곳에서 UDP로 전송
+        // 랜덤 토큰 생성 및 저장
+        std::string udp_token = generate_random_token();
+        session->set_udp_token(udp_token);
+
         nlohmann::json response;
         response["type"] = "udp_register_ack";
-        response["msg"] = "UDP endpoint registered";
+        response["msg"] = "UDP 인증 토큰 발급 및 endpoint registered";
+        response["token"] = udp_token;
         response["nickname"] = jmsg.value("nickname", "anonymity");
 
         auto data = std::make_shared<std::string>(response.dump());
         udp_socket.async_send_to(
             boost::asio::buffer(*data), from,
             [data](const boost::system::error_code& ec, std::size_t bytes) {
-                if (ec) g_logger->warn("[UDP][send_to callback] Error: {}", ec.message());
+                if (ec) g_logger->error("[UDP][send_to callback] Error 5: {}", ec.message());
             }
         );
     }
+    else if (type == "broadcast_udp_zone") {
+        if (!session) return;
+        int zone_id = session->get_zone_id();
+        if (auto handler = handler_) { // handler_는 DataHandler*
+            auto zone = handler->get_zone(zone_id);
+            if (zone) {
+                // 브로드캐스트 내용 구성 (token 등은 제외!)
+                nlohmann::json out;
+                out["type"] = "broadcast_udp_zone";
+                out["nickname"] = session->get_nickname();
+                out["msg"] = jmsg.value("msg", "");
+                std::string out_str = out.dump();
+
+                for (const auto& s : zone->sessions()) {  // shared_ptr<SSLSession>
+                    if (!s) continue;
+
+                    if (auto ep = s->get_udp_endpoint()) {
+                        auto data = std::make_shared<std::string>(out_str);
+                        udp_socket.async_send_to(
+                            boost::asio::buffer(*data), *ep,
+                            [data](const boost::system::error_code&, std::size_t) {});
+                    }
+                }
+                return;
+            }
+            else {
+                g_logger->warn("[UDP] Zone {} not found for broadcast_udp_zone", zone_id);
+            }
+        }
+    }
+
     else {
         // 기타 타입 기본 에코
         std::string response = "Echo(UDP): " + raw_msg;
         auto data = std::make_shared<std::string>(response);
         udp_socket.async_send_to(
             boost::asio::buffer(*data), from,
-            [data](const boost::system::error_code&, std::size_t) {});
+            [data](const boost::system::error_code& ec, std::size_t) {
+                if (ec) g_logger->warn("[UDP][send_to callback] Error 6: {}", ec.message());
+            });
     }
 }
 

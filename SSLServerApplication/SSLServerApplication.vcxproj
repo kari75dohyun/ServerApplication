@@ -139,6 +139,7 @@
     <ClCompile Include="SSLServerApplication.cpp" />
     <ClCompile Include="SSLSession.cpp" />
     <ClCompile Include="UDPManager.cpp" />
+    <ClCompile Include="Zone.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DataHandler.h" />
@@ -149,6 +150,8 @@
     <ClInclude Include="SSLServer.h" />
     <ClInclude Include="SSLSession.h" />
     <ClInclude Include="UDPManager.h" />
+    <ClInclude Include="Utility.h" />
+    <ClInclude Include="Zone.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

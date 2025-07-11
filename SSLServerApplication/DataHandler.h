@@ -7,12 +7,23 @@
 #include <functional>
 #include "MessageDispatcher.h"   // 추가!
 #include "SessionPool.h"         // 세션 풀 헤더 추가
+#include <boost/asio/strand.hpp>
+#include "Zone.h"
 
 class SSLSession;  // 전방 선언, SSLSession 클래스가 정의되기 전에 사용
 class SessionPool; // 전방 선언, SessionPool 클래스가 정의되기 전에 사용
+class Zone;
 
+#include "Zone.h" // Add this include to resolve the incomplete type error for "Zone"
 class DataHandler {
 private:
+    static constexpr int UDP_EXPIRE_TIMEOUT_SECONDS = 300;  // UDP 만료 시간 제한(초)
+    static constexpr size_t USER_LIMIT_PER_SEC = 10;        // 1초에 유저당 10패킷 제한
+    static constexpr size_t TOTAL_LIMIT_PER_SEC = 1000;     // 1초에 전체 1000패킷 제한
+	static constexpr size_t MAX_ZONE_COUNT = 10;            // 최대 존 개수
+    static constexpr size_t kMaxUdpQueueSize = 10000;       // 필요에 따라 값 조정
+	static constexpr size_t MAX_ZONE_SESSION_COUNT = 300; // 최대 ZONE 세션 개수
+
     unsigned int shard_count = 0;
     std::vector<std::unordered_map<int, std::shared_ptr<SSLSession>>> session_buckets;
     std::vector<std::mutex> session_mutexes;
@@ -33,9 +44,18 @@ private:
     boost::asio::steady_timer keepalive_timer_;
     //std::chrono::seconds ping_interval_ = std::chrono::seconds(20);     // ping 보낼 주기
     std::chrono::seconds keepalive_timeout_ = std::chrono::seconds(60); // pong 없을때 세션 끊는 시간
+	// UDP Flood 방지 관련
+    std::atomic<size_t> udp_total_packet_count_{ 0 };
+    std::chrono::steady_clock::time_point udp_total_packet_window_{};
+
+    // UDP 송신 큐와 직렬화용 strand
+    std::queue<std::tuple<std::shared_ptr<std::string>, boost::asio::ip::udp::endpoint>> udp_send_queue_;
+    bool udp_send_in_progress_ = false;
+    std::unique_ptr<boost::asio::strand<boost::asio::any_io_executor>> udp_send_strand_;
+    void try_send_next_udp(boost::asio::ip::udp::socket& udp_socket);
 
 public:
-    DataHandler(boost::asio::io_context& io); // 생성자 선언 필요!
+    DataHandler(boost::asio::io_context& io, int zone_count = MAX_ZONE_COUNT); // 생성자 선언 필요!
     // *** 여기! 복사 금지 선언 추가 ***
     DataHandler(const DataHandler&) = delete;
     DataHandler& operator=(const DataHandler&) = delete;
@@ -110,8 +130,34 @@ public:
     void start_keepalive_loop();
     void do_keepalive_check();
 
+	//UDP 송신큐 Srand 기반 직렬화로 수정.
     void udp_broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname);
 
 	// 로그인 하지 않고 DDos 공격하는 세션 정리
     void cleanup_unauth_sessions(size_t max_unauth); // 미인증 세션 정리
+
+	// UDP 엔드포인트 만료 처리
+    void expire_stale_udp_endpoints(std::chrono::seconds timeout);
+
+	// UDP Flood 방지 관련 Set, Get 함수 추가
+    void set_udp_total_packet_count(size_t count) {
+        udp_total_packet_count_ = count;
+	}
+    const size_t get_udp_total_packet_count() const {
+        return udp_total_packet_count_;
+    }
+    void inc_udp_total_packet_count() { ++udp_total_packet_count_; }
+    void set_udp_total_packet_window(const std::chrono::steady_clock::time_point& window) {
+        udp_total_packet_window_ = window;
+    }
+    const std::chrono::steady_clock::time_point get_udp_total_packet_window() const {
+        return udp_total_packet_window_;
+	}
+
+    // zone, channel, room별로 나눈다.
+    std::unordered_map<int, std::shared_ptr<Zone>> zones_;
+    void assign_session_to_zone(std::shared_ptr<SSLSession> session, int zone_id);  // zone 배정 함수
+    void udp_broadcast_zone(int zone_id, const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname);
+
+    std::shared_ptr<Zone> get_zone(int zone_id);
 };

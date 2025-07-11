@@ -3,6 +3,8 @@
 #include "DataHandler.h"  
 #include <boost/asio.hpp>
 #include "Logger.h"
+#include <random>
+#include <sstream>
 
 using namespace std;
 using namespace boost::asio;
@@ -83,10 +85,24 @@ void SSLSession::run_next_task() {
 void SSLSession::close_session() {
     if (closed_.exchange(true)) return;
     set_state(SessionState::Closed);    // 세션 상태 종료로!
+    // UDP 엔드포인트도 제거!
+    clear_udp_endpoint();
+
+    // ZONE 에서 세션 제거
+    if (auto handler = data_handler_.lock()) {
+        int zone_id = get_zone_id();
+        if (zone_id > 0) {
+            auto it = handler->zones_.find(zone_id);
+            if (it != handler->zones_.end()) {
+                it->second->remove_session(shared_from_this());
+                g_logger->info("[ZONE] 세션 {} → ZONE {}에서 제거(종료)", session_id_, zone_id);
+            }
+        }
+    }
 
     auto self = shared_from_this();
     try {
-        // ⭐️ SSL 종료 핸드쉐이크 (async_shutdown) 먼저 호출
+        // SSL 종료 핸드쉐이크 (async_shutdown) 먼저 호출
         socket_.async_shutdown(
             boost::asio::bind_executor(strand_,
                 [this, self](const boost::system::error_code& ec) {
@@ -259,7 +275,7 @@ std::string SSLSession::get_client_ip() const {
     try {
         return socket_.lowest_layer().remote_endpoint().address().to_string();
     }
-    catch (const std::exception& e) {
+    catch (const std::exception&) {
         return "unknown";
     }
 }
@@ -268,7 +284,15 @@ unsigned short SSLSession::get_client_port() const {
     try {
         return socket_.lowest_layer().remote_endpoint().port();
     }
-    catch (const std::exception& e) {
+    catch (const std::exception&) {
         return 0;
     }
+}
+
+void SSLSession::update_udp_alive_time() {
+    last_udp_alive_time_ = std::chrono::steady_clock::now();
+}
+
+std::chrono::steady_clock::time_point SSLSession::get_last_udp_alive_time() const {
+    return last_udp_alive_time_.load();
 }

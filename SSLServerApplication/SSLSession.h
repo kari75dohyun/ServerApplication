@@ -59,6 +59,15 @@ private:
 	// UDP 엔드포인트
     std::optional<boost::asio::ip::udp::endpoint> udp_endpoint_;
     std::chrono::steady_clock::time_point udp_ep_update_time_{};
+    //UDP 엔드포인트 갱신 및 만료
+    std::atomic<std::chrono::steady_clock::time_point> last_udp_alive_time_{};
+
+    std::string udp_token_; // UDP 임시 토큰
+	// UDP Flood 방지 관련
+    std::atomic<size_t> udp_packet_count_{ 0 };
+    std::chrono::steady_clock::time_point udp_packet_window_{};
+
+    int zone_id_ = 0; // 기본 0 = 미배정
 
 public:
     // 생성자: 클라이언트 소켓과 SSL 컨텍스트를 받아 SSL 스트림을 초기화
@@ -149,6 +158,40 @@ public:
 
 	std::string get_client_ip() const;      // 클라이언트 IP 주소를 가져오는 함수
 	unsigned short get_client_port() const; // 클라이언트 포트를 가져오는 함수
+
+	// UDP endpoint 만료시간 갱신 및 조회
+    void update_udp_alive_time();
+    std::chrono::steady_clock::time_point get_last_udp_alive_time() const;
+
+    // UDP 임시 토큰 
+	void set_udp_token(const std::string& token) { udp_token_ = token; }
+    const std::string get_udp_token() const { return udp_token_; }
+
+    // 세션 상태를 문자열로 변환 (디버깅용)
+    std::string state_to_string() const {
+        switch (state_) {
+            case SessionState::Handshaking: return "Handshaking";
+            case SessionState::LoginWait: return "LoginWait";
+            case SessionState::Ready: return "Ready";
+            case SessionState::Closed: return "Closed";
+            default: return "Unknown";
+        }
+	}
+
+    // UDP Flood 방지 관련
+    void set_udp_packet_count(size_t count) { udp_packet_count_ = count; }
+    const size_t get_udp_packet_count() const { return udp_packet_count_.load(); }
+    void inc_udp_packet_count() { ++udp_packet_count_; }
+    void set_udp_packet_window(const std::chrono::steady_clock::time_point& window) {
+        udp_packet_window_ = window;
+    }
+    const std::chrono::steady_clock::time_point get_udp_packet_window() const {
+        return udp_packet_window_;
+	}
+
+    void set_zone_id(int zone_id) { zone_id_ = zone_id; }
+    int get_zone_id() const { return zone_id_; }
+
 private:
     void do_write_queue();
 
