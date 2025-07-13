@@ -88,7 +88,7 @@ public:
         boost::asio::ip::udp::socket& udp_socket);
 
     // 전체 세션을 정확하게 순회하는 함수(콜백 전달 방식)
-    void for_each_session(std::function<void(const std::shared_ptr<SSLSession>&)> fn);
+    void for_each_session(const std::function<void(const std::shared_ptr<SSLSession>&)> fn);
     size_t get_total_session_count();
 
     void broadcast_strict(const std::string& msg);
@@ -96,20 +96,19 @@ public:
     //(샤드 전체 락 + 일관된 순회)
     template<typename Func>
     void for_each_session(Func&& func) {
-        // 1. 모든 샤드 lock (deadlock 방지: 항상 0~N순)
-        std::vector<std::unique_lock<std::mutex>> locks;
-        locks.reserve(shard_count);
-        for (unsigned int shard = 0; shard < shard_count; ++shard) {
-            locks.emplace_back(session_mutexes[shard]);
+        std::vector<std::shared_ptr<SSLSession>> sessions;
+        {
+            std::vector<std::unique_lock<std::mutex>> locks;
+            locks.reserve(shard_count);
+            for (unsigned int shard = 0; shard < shard_count; ++shard)
+                locks.emplace_back(session_mutexes[shard]);
+            for (unsigned int shard = 0; shard < shard_count; ++shard)
+                for (const auto& [id, sess] : session_buckets[shard])
+                    sessions.push_back(sess);
         }
-
-        // 2. 전체 세션 순회
-        for (unsigned int shard = 0; shard < shard_count; ++shard) {
-            for (const auto& [id, sess] : session_buckets[shard]) {
-                func(sess);
-            }
+        for (const auto& sess : sessions) {
+            func(sess);
         }
-        // 3. lock 자동 해제(스코프 종료)
     }
 
     // 세션 풀에 대한 getter 추가  

@@ -13,7 +13,10 @@ class Zone : public std::enable_shared_from_this<Zone> {
 private:
     size_t max_sessions_;  // zoen 입장 인원 최대 300명
     int zone_id_;
-    std::unordered_set<std::shared_ptr<SSLSession>> sessions_;
+    //std::unordered_set<std::shared_ptr<SSLSession>> sessions_;
+    //std::unordered_set<SSLSession*> sessions_;
+    std::unordered_map<int, std::weak_ptr<SSLSession>> sessions_;
+
 public:
 	static constexpr size_t kMaxUdpQueueSize = 10000;  // 최대 UDP 송신 큐 크기
 
@@ -29,8 +32,8 @@ public:
 
     boost::asio::strand<boost::asio::io_context::executor_type> strand_;
 
-    bool add_session(std::shared_ptr<SSLSession> sess);
-    void remove_session(std::shared_ptr<SSLSession> sess);
+    bool add_session(const std::shared_ptr<SSLSession>& sess);
+    void remove_session(const std::shared_ptr<SSLSession>& sess);
     int get_zone_id() const { return zone_id_; }
 
     void broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname);

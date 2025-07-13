@@ -235,24 +235,6 @@ void DataHandler::broadcast(const string& msg, int sender_session_id, shared_ptr
     }
 }
 
-// 전체 세션을 "정확하게" 순회 (락 순서대로 걸고 해제)
-void DataHandler::for_each_session(function<void(const shared_ptr<SSLSession>&)> fn) {
-    // 1. 모든 샤드 lock (락 순서 꼭 지켜야 deadlock 방지)
-    for (unsigned int i = 0; i < shard_count; ++i)
-        session_mutexes[i].lock();
-
-    // 2. 모든 세션에 대해 콜백 호출
-    for (unsigned int i = 0; i < shard_count; ++i) {
-        for (const auto& [id, sess] : session_buckets[i]) {
-            fn(sess);
-        }
-    }
-
-    // 3. lock 해제 (순서 무관, but 관례적으로 0~N순서)
-    for (unsigned int i = 0; i < shard_count; ++i)
-        session_mutexes[i].unlock();
-}
-
 // 전체 세션 수 정확히 세기
 size_t DataHandler::get_total_session_count() {
     size_t total = 0;
@@ -360,31 +342,15 @@ void DataHandler::expire_stale_udp_endpoints(std::chrono::seconds timeout) {
 
 // UDP 메시지 수신 처리
 void DataHandler::on_udp_receive(const std::string& msg, const udp::endpoint& from, udp::socket& udp_socket) {
-    using namespace std::chrono;
-
-    auto now = steady_clock::now();
-
-    // [1] 서버 전체 UDP 패킷 제한
-    {
-        static std::mutex udp_total_mutex;
-        std::lock_guard<std::mutex> lock(udp_total_mutex);
-        if (now - get_udp_total_packet_window() > std::chrono::seconds(1)) {
-            set_udp_total_packet_window(now);
-            set_udp_total_packet_count(0);
-        }
-        inc_udp_total_packet_count();
-        if (get_udp_total_packet_count() > TOTAL_LIMIT_PER_SEC) {
-            g_logger->warn("[UDP][FLOOD] 서버 전체 초과 ({}패킷/1초)", udp_total_packet_count_.load());
-            return;
-        }
+    // [1] 서버 전체 UDP 패킷 제한 (중복방지)
+    if (!check_total_udp_rate_limit(udp_total_packet_count_, udp_total_packet_window_, TOTAL_LIMIT_PER_SEC)) {
+        g_logger->warn("[UDP][FLOOD] 서버 전체 초과 ({}/1초)", udp_total_packet_count_.load());
+        return;
     }
 
-    nlohmann::json res;
-    try {
-        res = nlohmann::json::parse(msg);
-    }
-    catch (const std::exception& e) {
-        g_logger->info("[UDP] JSON Parse failed: {} / original: {}", e.what(), msg);
+    // [2] JSON 파싱
+    auto jmsg_opt = try_parse_json(msg);
+    if (!jmsg_opt) {
         std::string response = R"({"type":"error","msg":"Invalid JSON"})";
         auto data = std::make_shared<std::string>(response);
         udp_socket.async_send_to(
@@ -395,64 +361,49 @@ void DataHandler::on_udp_receive(const std::string& msg, const udp::endpoint& fr
         );
         return;
     }
+    const auto& res = *jmsg_opt;
 
-    string nickname = res.value("nickname", "");
-    string type = res.value("type", "");
-    string token = res.value("token", "");
+    const std::string nickname = res.value("nickname", "");
+    const std::string type = res.value("type", "");
+    const std::string token = res.value("token", "");
 
-    // [2] 닉네임 체크
+    // [3] 닉네임 체크
     if (nickname.empty()) {
         g_logger->warn("[UDP] 임의 패킷 차단: 닉네임 없음 / EP({}:{})", from.address().to_string(), from.port());
         return;
     }
 
-    // [3] 세션 조회
+    // [4] 세션 조회
     auto session = find_session_by_nickname(nickname);
     if (!session) {
         g_logger->warn("[UDP] 임의 패킷 차단: 닉네임({})/EP({}:{})", nickname, from.address().to_string(), from.port());
         return;
     }
 
-    // [4] 토큰 검사 (udp_register만 예외)
+    // [5] 토큰 검사 (udp_register만 예외)
     if (type != "udp_register") {
-        if (token.empty()) {
-            g_logger->warn("[UDP] token is empty! nickname={}, remote_ep={}", nickname, from.address().to_string());
-            nlohmann::json resp = { {"type", "error"}, {"msg", "UDP token is required"} };
-            auto data = std::make_shared<std::string>(resp.dump());
-            udp_socket.async_send_to(boost::asio::buffer(*data), from, [data](const boost::system::error_code&, size_t) {});
-            return;
-        }
-        if (session->get_udp_token() != token) {
-            g_logger->warn("[UDP] Invalid udp_token! nickname={}, remote_ep={}", nickname, from.address().to_string());
-            nlohmann::json resp = { {"type", "error"}, {"msg", "Invalid UDP token"} };
+        if (token.empty() || session->get_udp_token() != token) {
+            g_logger->warn("[UDP] Invalid or missing udp_token! nickname={}, remote_ep={}", nickname, from.address().to_string());
+            nlohmann::json resp = { {"type", "error"}, {"msg", token.empty() ? "UDP token is required" : "Invalid UDP token"} };
             auto data = std::make_shared<std::string>(resp.dump());
             udp_socket.async_send_to(boost::asio::buffer(*data), from, [data](const boost::system::error_code&, size_t) {});
             return;
         }
     }
 
-    // [5] 유저별 UDP Flood 제한
-    {
-        static std::mutex udp_user_mutex;
-        std::lock_guard<std::mutex> lock(udp_user_mutex);
-        if (now - session->get_udp_packet_window() > std::chrono::seconds(1)) {
-            session->set_udp_packet_window(now);
-            session->set_udp_packet_count(0);
-        }
-        session->inc_udp_packet_count();
-        if (session->get_udp_packet_count() > USER_LIMIT_PER_SEC) {
-            g_logger->warn("[UDP][FLOOD] 유저({}) 초과 ({}패킷/1초)", session->get_nickname(), session->get_udp_packet_count());
-            nlohmann::json resp = { {"type", "error"}, {"msg", "UDP rate limit exceeded"} };
-            auto data = std::make_shared<std::string>(resp.dump());
-            udp_socket.async_send_to(boost::asio::buffer(*data), from,
-                [data](const boost::system::error_code& ec, size_t) {
-                    g_logger->warn("[UDP][브로드캐스트] 전송 에러 1{}", ec.message());
-                });
-            return;
-        }
+    // [6] 유저별 UDP Flood 제한
+    if (!check_user_udp_rate_limit(*session, USER_LIMIT_PER_SEC)) {
+        g_logger->warn("[UDP][FLOOD] 유저({}) 초과 ({}/1초)", session->get_nickname(), session->get_udp_packet_count());
+        nlohmann::json resp = { {"type", "error"}, {"msg", "UDP rate limit exceeded"} };
+        auto data = std::make_shared<std::string>(resp.dump());
+        udp_socket.async_send_to(boost::asio::buffer(*data), from,
+            [data](const boost::system::error_code& ec, size_t) {
+                g_logger->warn("[UDP][브로드캐스트] 전송 에러 1{}", ec.message());
+            });
+        return;
     }
 
-    // [6] 엔드포인트 변화 감지 및 갱신 (연결 유지기능) => 이게 그 프라우드넷이 자랑하던 연결 유지 기능
+    // [7] 엔드포인트 변화 감지 및 갱신
     auto prev_ep = session->get_udp_endpoint();
     if (!prev_ep || *prev_ep != from) {
         g_logger->info("[UDP] endpoint 변경 감지! 이전: {}:{} → 신규: {}:{}",
@@ -464,9 +415,10 @@ void DataHandler::on_udp_receive(const std::string& msg, const udp::endpoint& fr
     session->set_udp_endpoint(from);
     session->update_udp_alive_time();
 
-    // [7] dispatcher에 전달 (모든 검증 완료 후!)
+    // [8] dispatcher에 전달 (모든 검증 완료 후!)
     dispatcher_.dispatch_udp(session, msg, from, udp_socket);
 }
+
 
 //void DataHandler::on_udp_receive(const string& msg, const udp::endpoint& from, udp::socket& udp_socket) {
 //    shared_ptr<SSLSession> session = nullptr;
@@ -694,21 +646,21 @@ void DataHandler::on_udp_receive(const string& msg, const udp::endpoint& from, u
 */
 
 void DataHandler::udp_broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname) {
-    // 모든 송신 처리를 strand 내부로 직렬화
     boost::asio::post(*udp_send_strand_, [this, msg, &udp_socket, sender_nickname]() {
-        // === UDP 큐 길이 제한 ===
-        if (udp_send_queue_.size() > kMaxUdpQueueSize) {
-            // 정책1: 새 메시지 drop 및 경고
-            g_logger->warn("[UDP][Global] udp_send_queue_ overflow (size={}) - dropping message", udp_send_queue_.size());
-            return;
-            // 정책2: 오래된 메시지부터 버리고 추가하고 싶다면 아래처럼
-            // while (udp_send_queue_.size() > kMaxUdpQueueSize) udp_send_queue_.pop();
+        // 큐 사이즈가 넘치면 오래된 것부터 제거
+        while (udp_send_queue_.size() >= kMaxUdpQueueSize) {
+            g_logger->warn("[UDP][Global] udp_send_queue_ overflow (size={}), dropping oldest", udp_send_queue_.size());
+            udp_send_queue_.pop();
         }
-        // 1. 모든 세션을 순회해서 endpoint를 큐에 push
-        for_each_session([&](std::shared_ptr<SSLSession> sess) {
+        //if (udp_send_queue_.size() > kMaxUdpQueueSize) {
+            //// 정책1: 새 메시지 drop 및 경고
+            //g_logger->warn("[UDP][Global] udp_send_queue_ overflow (size={}) - dropping message", udp_send_queue_.size());
+            //return;
+        //}
+        for_each_session([&](const std::shared_ptr<SSLSession> sess) {
             if (!sess) return;
             if (sess->get_nickname().empty()) return;
-            if (sess->get_nickname() == sender_nickname) return; // 자기자신 제외
+            if (sess->get_nickname() == sender_nickname) return; // 자기 자신 제외
 
             auto udp_ep = sess->get_udp_endpoint();
             if (udp_ep) {
@@ -717,14 +669,12 @@ void DataHandler::udp_broadcast(const std::string& msg, boost::asio::ip::udp::so
                 send["type"] = recv.value("type", "");
                 send["nickname"] = recv.value("nickname", "");
                 send["msg"] = recv.value("msg", "");
-
                 auto data = std::make_shared<std::string>(send.dump());
-
-                //auto data = std::make_shared<std::string>(msg);
                 udp_send_queue_.emplace(data, *udp_ep);
             }
             });
-        // 2. 큐 송신 시작
+
+        // 큐 송신 시도
         try_send_next_udp(udp_socket);
         });
 }
@@ -820,7 +770,7 @@ void DataHandler::try_send_next_udp(boost::asio::ip::udp::socket& udp_socket) {
 void DataHandler::cleanup_unauth_sessions(size_t max_unauth) {
     vector<shared_ptr<SSLSession>> unauth_sessions;
 
-    for_each_session([&](shared_ptr<SSLSession> sess) {
+    for_each_session([&](const shared_ptr<SSLSession> sess) {
         if (!sess) return;
         SessionState state = sess->get_state();
         if (state == SessionState::Handshaking || state == SessionState::LoginWait) {
@@ -854,11 +804,16 @@ void DataHandler::udp_broadcast_zone(int zone_id, const std::string& msg, boost:
 void DataHandler::assign_session_to_zone(std::shared_ptr<SSLSession> session, int zone_id) {
     auto it = zones_.find(zone_id);
     if (it != zones_.end()) {
-        it->second->add_session(session);
-        session->set_zone_id(zone_id); // 세션에도 현재 존 기록(필요시)
-        g_logger->info("[ZONE] 세션 {} → ZONE {} 배정", session->get_session_id(), zone_id);
+        if (it->second->add_session(session)) {
+            session->set_zone_id(zone_id);
+            g_logger->info("[ZONE] 세션 {} → ZONE {} 배정", session->get_session_id(), zone_id);
+        }
+        else {
+            g_logger->warn("[ZONE] 세션 {} → ZONE {} add_session 실패 (존 인원수/중복 체크)", session->get_session_id(), zone_id);
+        }
     }
 }
+
 
 std::shared_ptr<Zone> DataHandler::get_zone(int zone_id) {
     auto it = zones_.find(zone_id);

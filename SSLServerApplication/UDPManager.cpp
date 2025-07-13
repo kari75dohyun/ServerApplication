@@ -28,23 +28,11 @@ void UDPManager::start_receive() {
                 auto msg = std::make_shared<std::string>(buffer_.data(), bytes_recvd);
 
                 if (auto handler = data_handler_.lock()) {
-                    // 예시: 클라이언트가 {"type":"broadcast_udp", ...}로 보내면 전체 브로드캐스트
                     try {
-                        //auto jmsg = nlohmann::json::parse(*msg);
-                      
-                        //if (jmsg.value("type", "") == "broadcast_udp") {
-                        //    // 전체 유저에게 UDP 브로드캐스트
-                        //    std::string sender_nickname = jmsg.value("nickname", "");
-                        //    handler->udp_broadcast(*msg, socket_, sender_nickname);
-                        //}
-                        //else {
-                        //    handler->on_udp_receive(*msg, remote_endpoint_, socket_);
-                        //}
-
                         handler->on_udp_receive(*msg, remote_endpoint_, socket_);
                     }
-                    catch (...) {
-                        handler->on_udp_receive(*msg, remote_endpoint_, socket_);
+                    catch (const std::exception& e) {
+                        g_logger->error("[UDPManager] on_udp_receive 예외 발생: {}", e.what());
                     }
                 }
             }

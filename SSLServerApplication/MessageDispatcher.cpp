@@ -189,8 +189,14 @@ void MessageDispatcher::dispatch_udp(std::shared_ptr<SSLSession> session, const 
                 out["msg"] = jmsg.value("msg", "");
                 std::string out_str = out.dump();
 
-                for (const auto& s : zone->sessions()) {  // shared_ptr<SSLSession>
-                    if (!s) continue;
+                // 수정: map<int, weak_ptr> 순회
+                const auto& sessions = zone->sessions();
+                for (auto it = sessions.begin(); it != sessions.end(); ++it) {
+                    std::shared_ptr<SSLSession> s = it->second.lock();
+                    if (!s) continue; // 세션 만료
+
+                    if (s->get_nickname() == session->get_nickname())
+                        continue; // 자기자신 제외
 
                     if (auto ep = s->get_udp_endpoint()) {
                         auto data = std::make_shared<std::string>(out_str);

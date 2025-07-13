@@ -22,6 +22,12 @@ private:
     static constexpr size_t MAX_TASK_QUEUE = 1000;
     static constexpr int LOGIN_TIMEOUT_SECONDS = 30;  // 로그인 제한(초)
 
+    size_t write_queue_overflow_count_ = 0;          // 연속 overflow count
+
+    static constexpr size_t kMaxWriteQueueSize = 100;            // 임계치2: queue 최대 길이
+    static constexpr size_t kWriteQueueWarnThreshold = 80;       // 임계치1: 경고 임계(80%)
+    static constexpr size_t kWriteQueueOverflowLimit = 10;       // 임계치3: 연속 FULL 세션 종료 한계
+
     boost::asio::ssl::stream<boost::asio::ip::tcp::socket> socket_;  // SSL 스트림을 사용한 소켓
     boost::asio::strand<boost::asio::any_io_executor> strand_;       // 수정된 strand_ 타입
     char data_[2048];                                                // 데이터를 읽을 버퍼
@@ -69,6 +75,8 @@ private:
 
     int zone_id_ = 0; // 기본 0 = 미배정
 
+    std::atomic<uint64_t> generation_{ 0 };   // generation: reset시 증가
+
 public:
     // 생성자: 클라이언트 소켓과 SSL 컨텍스트를 받아 SSL 스트림을 초기화
     SSLSession(boost::asio::ip::tcp::socket socket, boost::asio::ssl::context& context, int session_id, std::weak_ptr<DataHandler> data_handler);
@@ -89,6 +97,7 @@ public:
 
     // Setter for message_  
     void set_message(const std::string& message) { message_ = message; }
+    void set_message(std::string&& message) { message_ = std::move(message); }
 
     // Getter for socket_  
     boost::asio::ssl::stream<boost::asio::ip::tcp::socket>& get_socket() { return socket_; }
@@ -100,6 +109,8 @@ public:
 
     // nickname 설정 및 가져오기
     void set_nickname(const std::string& n) { nickname_ = n; }
+    void set_nickname(std::string&& n) { nickname_ = std::move(n); }
+
     std::string get_nickname() const { return nickname_; }
     // 라인 버퍼를 가져오는 함수
     std::string& get_line_buffer() { return line_buffer_; }
@@ -191,6 +202,11 @@ public:
 
     void set_zone_id(int zone_id) { zone_id_ = zone_id; }
     int get_zone_id() const { return zone_id_; }
+
+    void enqueue_write(std::shared_ptr<std::string> msg);
+
+    uint64_t get_generation() const { return generation_.load(); }
+    void increment_generation() { ++generation_; }
 
 private:
     void do_write_queue();

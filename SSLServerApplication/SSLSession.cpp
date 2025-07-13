@@ -5,6 +5,7 @@
 #include "Logger.h"
 #include <random>
 #include <sstream>
+#include "Utility.h"
 
 using namespace std;
 using namespace boost::asio;
@@ -85,7 +86,6 @@ void SSLSession::run_next_task() {
 void SSLSession::close_session() {
     if (closed_.exchange(true)) return;
     set_state(SessionState::Closed);    // 세션 상태 종료로!
-    // UDP 엔드포인트도 제거!
     clear_udp_endpoint();
 
     // ZONE 에서 세션 제거
@@ -107,22 +107,39 @@ void SSLSession::close_session() {
             boost::asio::bind_executor(strand_,
                 [this, self](const boost::system::error_code& ec) {
                     if (ec && ec != boost::asio::error::eof) {
-                        //std::cerr << "[close_session] async_shutdown error: " << ec.message() << std::endl;
-                        //LOG_ERROR("[close_session] async_shutdown error: ", ec.message());
                         g_logger->error("[close_session] async_shutdown error: {}", ec.message());
-                    }
-                    // TCP 소켓 안전하게 닫기
-                    boost::system::error_code ec2;
-                    socket_.lowest_layer().shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec2);
-                    if (ec2) {
-                        g_logger->error("[close_session] tcp shutdown error: {}", ec2.message()); //LOG_ERROR("[close_session] tcp shutdown error: ", ec2.message());  //std::cerr << "[close_session] tcp shutdown error: " << ec2.message() << std::endl;
-                    }
-                    socket_.lowest_layer().close(ec2);
-                    if (ec2) {
-                        g_logger->error("[close_session] tcp close error: {}", ec2.message()); //LOG_ERROR("[close_session] tcp close error: ", ec2.message());//std::cerr << "[close_session] tcp close error: " << ec2.message() << std::endl;
+
+                        // 재시도 로직: 3회까지 시도
+                        int retry = 0;
+                        boost::system::error_code ec_retry;
+                        while (retry < 3 && ec) {
+                            ++retry;
+                            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                            socket_.lowest_layer().shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec_retry);
+                            if (!ec_retry) break;
+                        }
+                        if (ec_retry) {
+                            g_logger->error("[close_session] async_shutdown 3회 재시도 실패: {}", ec_retry.message());
+                            // 필요하다면 관리자 알람, 강제 세션 정리 등 추가
+                        }
                     }
 
-                    // ⭐️ remove_session을 마지막에 호출 (release 등 포함)
+                    // TCP 소켓 안전하게 닫기 (재시도 내장)
+                    boost::system::error_code ec2;
+                    int close_retry = 0;
+                    while (close_retry < 3) {
+                        socket_.lowest_layer().close(ec2);
+                        if (!ec2) break;
+                        g_logger->warn("[close_session] tcp close error ({}회차): {}", close_retry + 1, ec2.message());
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        ++close_retry;
+                    }
+                    if (ec2) {
+                        g_logger->error("[close_session] tcp close error (최종실패): {}", ec2.message());
+                        // 필요시 실시간 알람/추가 복원로직 send_admin_alert 등
+                    }
+
+                    // remove_session을 마지막에 호출
                     if (auto handler = data_handler_.lock()) {
                         handler->remove_session(session_id_);
                     }
@@ -131,27 +148,31 @@ void SSLSession::close_session() {
         );
     }
     catch (const std::exception& e) {
-        //std::cerr << "[close_session] Exception: " << e.what() << std::endl;
-        //LOG_ERROR("[close_session] Exception: ", e.what());
         g_logger->error("[close_session] Exception: {}", e.what());
+		// 예외 발생시 슬랙으로 관리자 알람 등 추가 처리 
+        send_admin_alert(std::string("[close_session] Exception: ") + e.what());
     }
 }
+
 
 // (1) post_write(기존 string용 → shared_ptr 버전으로 변환해서 호출)
 void SSLSession::post_write(const std::string& msg) {
     post_write(std::make_shared<std::string>(msg));
 }
+
 // (2) post_write(shared_ptr 버전, 핵심 로직)
-void SSLSession::post_write(std::shared_ptr<std::string> msg) {
+void SSLSession::post_write(const std::shared_ptr<std::string> msg) {
     auto self = shared_from_this();
     boost::asio::dispatch(strand_, [this, self, msg]() {
-        if (write_queue_.size() >= MAX_WRITE_QUEUE) {
-            std::cerr << "[WARN] write_queue_ overflow! (session_id=" << session_id_ << ")\n";
-            close_session();
-            return;
-        }
+		// 기존 write_queue_ 사이즈 초과시 무조건 close 하던거 삭제 enqueue_write 에서 처리 
+        //if (write_queue_.size() >= MAX_WRITE_QUEUE) {
+        //    std::cerr << "[WARN] write_queue_ overflow! (session_id=" << session_id_ << ")\n";
+        //    close_session();
+        //    return;
+        //}  
         bool idle = write_queue_.empty();
-        write_queue_.push(msg);
+        //write_queue_.push(msg);
+        enqueue_write(msg);
         if (idle) {
             write_in_progress_ = true;
             do_write_queue();
@@ -159,32 +180,69 @@ void SSLSession::post_write(std::shared_ptr<std::string> msg) {
         });
 }
 // (3) do_write_queue (shared_ptr<std::string> 사용)
+//void SSLSession::do_write_queue() {
+//    if (get_state() == SessionState::Closed) {
+//        g_logger->warn("Closed session: 콜백/메시지 무시 [session_id={}]", get_session_id());
+//        return;
+//    }
+//    auto self = shared_from_this();
+//    if (write_queue_.empty()) {
+//        write_in_progress_ = false;
+//        return;
+//    }
+//    auto msg = write_queue_.front(); // shared_ptr<std::string>
+//    boost::asio::async_write(socket_, boost::asio::buffer(*msg),
+//        boost::asio::bind_executor(strand_,
+//            [this, self](const boost::system::error_code& ec, std::size_t /*length*/) {
+//                if (!ec) {
+//                    write_queue_.pop();
+//                    do_write_queue(); // 다음 메시지 있으면 계속 write
+//                }
+//                else {
+//                    write_in_progress_ = false;
+//                    close_session();
+//                }
+//            }
+//        )
+//    );
+//}
+
 void SSLSession::do_write_queue() {
-    if (get_state() == SessionState::Closed) {
-        g_logger->warn("Closed session: 콜백/메시지 무시 [session_id={}]", get_session_id());
-        return;
-    }
+    if (get_state() == SessionState::Closed) return;
     auto self = shared_from_this();
     if (write_queue_.empty()) {
         write_in_progress_ = false;
         return;
     }
-    auto msg = write_queue_.front(); // shared_ptr<std::string>
+    auto msg = write_queue_.front();
+    uint64_t my_generation = generation_.load(std::memory_order_relaxed); // 세대 캡처
     boost::asio::async_write(socket_, boost::asio::buffer(*msg),
         boost::asio::bind_executor(strand_,
-            [this, self](const boost::system::error_code& ec, std::size_t /*length*/) {
-                if (!ec) {
+            [this, self, my_generation](const boost::system::error_code& ec, std::size_t /*length*/) {
+                try {
+                    // === generation check ===
+                    if (my_generation != generation_.load(std::memory_order_relaxed)) {
+                        g_logger->warn("[do_write_queue] Stale write callback (세대 mismatch)! 세션ID={} 무시", get_session_id());
+                        return;
+                    }
+
+                    if (ec) {
+                        g_logger->error("[do_write_queue] error: {}", ec.message());
+                        close_session();
+                        return;
+                    }
                     write_queue_.pop();
-                    do_write_queue(); // 다음 메시지 있으면 계속 write
+                    do_write_queue();
                 }
-                else {
-                    write_in_progress_ = false;
+                catch (const std::exception& e) {
+                    g_logger->error("[do_write_queue][Exception] {}", e.what());
                     close_session();
                 }
             }
         )
     );
 }
+
 
 void SSLSession::start_login_timeout() {
     if (get_state() == SessionState::Closed) {
@@ -254,22 +312,49 @@ void SSLSession::reset(boost::asio::ip::tcp::socket&& new_socket, int session_id
     // (2) 새 소켓 move 할당
     socket_.next_layer() = std::move(new_socket);
 
-    // (3) strand 등 재할당
+    // (3) strand, 타이머 등 재할당 (필수)
     strand_ = boost::asio::make_strand(socket_.get_executor());
-    login_timer_ = boost::asio::steady_timer(strand_);  // 꼭 같이 맞춰줘야 안전!
+    login_timer_ = boost::asio::steady_timer(strand_);
 
-    // (4) 내부 상태 모두 초기화
+    // (4) 내부 상태 모두 초기화 (★추가/확인★)
     session_id_ = session_id;
     nickname_.clear();
     line_buffer_.clear();
     message_.clear();
     memset(data_, 0, sizeof(data_));
+
     closed_ = false;
     read_pending_ = false;
+    task_running_ = false;
+    while (!task_queue_.empty()) task_queue_.pop();
+    while (!write_queue_.empty()) write_queue_.pop();
+
     set_state(SessionState::Handshaking);   // 새로운 세션 시작시 항상 초기 상태로!
-    // (5) 타이머, 버퍼, 큐 등 모두 초기화 (필요시)
-    // ...
+
+    // UDP 관련 모든 멤버 초기화
+    udp_endpoint_.reset();
+    udp_ep_update_time_ = std::chrono::steady_clock::time_point{};
+    last_udp_alive_time_.store(std::chrono::steady_clock::time_point{}); // 또는 std::chrono::steady_clock::now();
+    udp_token_.clear();
+    udp_packet_count_ = 0;
+    udp_packet_window_ = std::chrono::steady_clock::time_point{};
+
+    // ZONE/세션 풀 관련
+    zone_id_ = 0;
+
+    // keepalive/heartbeat
+    last_alive_time_ = std::chrono::steady_clock::now();
+
+    nickname_registered_ = false;
+
+    // 버퍼
+    msg_buf_mgr_.clear();
+
+    generation_.fetch_add(1, std::memory_order_relaxed); // 세대 증가!
+
+    g_logger->info("[SSLSession][reset] 세션 {} 내부 상태 초기화 완료", session_id_);
 }
+
 
 std::string SSLSession::get_client_ip() const {
     try {
@@ -295,4 +380,33 @@ void SSLSession::update_udp_alive_time() {
 
 std::chrono::steady_clock::time_point SSLSession::get_last_udp_alive_time() const {
     return last_udp_alive_time_.load();
+}
+
+void SSLSession::enqueue_write(std::shared_ptr<std::string> msg) {
+    // 1. 80% 초과 경고만
+    if (write_queue_.size() >= kWriteQueueWarnThreshold) {
+        g_logger->warn("[SSLSession][enqueue_write] write_queue 임계치(80%) 초과: size={}", write_queue_.size());
+    }
+
+    // 2. FULL(100%)이면 가장 오래된 것 drop, 연속이면 close
+    if (write_queue_.size() >= kMaxWriteQueueSize) {
+        g_logger->warn("[SSLSession][enqueue_write] write_queue FULL! 가장 오래된 메시지 drop, 새 메시지 push");
+        write_queue_.pop();
+
+        // 연속 FULL 카운트 증가
+        ++write_queue_overflow_count_;
+        if (write_queue_overflow_count_ >= kWriteQueueOverflowLimit) {
+            g_logger->error("[SSLSession][enqueue_write] write_queue FULL 연속 {}회, 세션 종료!", write_queue_overflow_count_);
+            closed_ = true;
+            // 실제 종료 처리가 필요하다면 여기에 추가!
+            // 예: socket_.lowest_layer().close();
+            return;
+        }
+    }
+    else {
+        write_queue_overflow_count_ = 0; // 정상상태면 count 리셋
+    }
+
+    // 3. push
+    write_queue_.push(msg);
 }

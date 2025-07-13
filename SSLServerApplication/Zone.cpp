@@ -9,34 +9,46 @@ Zone::Zone(boost::asio::io_context& io, int zone_id, size_t max_sessions)
     }
 
 void Zone::broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname) {
-    // 모든 세션에 대해 큐에 쌓음 (strand 내부에서 처리)
     auto self = shared_from_this();
     boost::asio::dispatch(strand_, [this, self, msg, &udp_socket, sender_nickname]() {
         // === UDP 큐 길이 제한 ===
-        if (udp_send_queue_.size() > kMaxUdpQueueSize) {
-            // 정책1: 새 메시지 drop
-            g_logger->warn("[UDP][Zone] Send queue overflow (zone_id={}, size={}) - dropping message", zone_id_, udp_send_queue_.size());
-            return;
-            // 또는
-            // 정책2: 오래된 것부터 지우고 추가
-            // while (udp_send_queue_.size() > kMaxUdpQueueSize) udp_send_queue_.pop();
+        while (udp_send_queue_.size() >= kMaxUdpQueueSize) {
+            g_logger->warn("[UDP][Zone] Send queue overflow (zone_id={}, size={}), dropping oldest", zone_id_, udp_send_queue_.size());
+            udp_send_queue_.pop();
         }
+
+        //if (udp_send_queue_.size() > kMaxUdpQueueSize) {
+        // 정책1: 새 메시지 drop
+        //g_logger->warn("[UDP][Zone] Send queue overflow (zone_id={}, size={}) - dropping message", zone_id_, udp_send_queue_.size());
+        //return;
 
         // 세션 락!
         std::lock_guard<std::mutex> lock(session_mutex_);
 
-        for (const auto& sess : sessions_) {
-            if (!sess) continue;
-            if (sess->get_nickname() == sender_nickname) continue;    // 자기 자신 제외
+        // map 순회 & weak_ptr->shared_ptr 안전 획득
+        for (auto it = sessions_.begin(); it != sessions_.end(); ) {
+            std::shared_ptr<SSLSession> sess = it->second.lock();
+            if (!sess) {
+                // 세션 소멸: map에서 clean up
+                it = sessions_.erase(it);
+                continue;
+            }
+            if (sess->get_nickname() == sender_nickname) {
+                ++it;
+                continue;
+            }
             auto udp_ep = sess->get_udp_endpoint();
             if (udp_ep) {
                 auto data = std::make_shared<std::string>(msg);
                 udp_send_queue_.emplace(data, *udp_ep);
             }
+            ++it;
         }
+
         try_send_next(udp_socket);
         });
 }
+
 
 void Zone::try_send_next(boost::asio::ip::udp::socket& udp_socket) {
     auto self = shared_from_this();
@@ -60,16 +72,26 @@ void Zone::try_send_next(boost::asio::ip::udp::socket& udp_socket) {
         });
 }
 
-bool Zone::add_session(std::shared_ptr<SSLSession> sess) {
+bool Zone::add_session(const std::shared_ptr<SSLSession>& sess) {
     std::lock_guard<std::mutex> lock(session_mutex_);
-    if (sessions_.size() >= max_sessions_) {
-        return false; // 300명이 꽉 찼으면 실패!
+    int id = sess->get_session_id();
+    if (sessions_.size() >= max_sessions_) return false;
+    if (sessions_.count(id) > 0) {
+        g_logger->warn("[ZONE] 이미 등록된 세션 add_session 시도 (중복 무시)");
+        return false;
     }
-    sessions_.insert(sess);
+    sessions_[id] = sess;  // weak_ptr로 등록
     return true;
 }
 
-void Zone::remove_session(std::shared_ptr<SSLSession> sess) {
+void Zone::remove_session(const std::shared_ptr<SSLSession>& sess) {
     std::lock_guard<std::mutex> lock(session_mutex_);
-    sessions_.erase(sess);
+    int id = sess->get_session_id();
+    if (sessions_.erase(id) > 0) {
+        g_logger->info("[ZONE] 세션 정상적으로 제거");
+    }
+    else {
+        g_logger->warn("[ZONE] 없는 세션 remove_session 시도 (무시 또는 디버깅)");
+    }
 }
+
