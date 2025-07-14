@@ -32,8 +32,6 @@ MessageDispatcher::MessageDispatcher(DataHandler* handler) : handler_(handler) {
         notice["msg"] = nickname + " has entered.";
         handler_->broadcast(notice.dump() + "\n", session->get_session_id(), session);
 
-        //session->set_message(R"({"type":"notice","msg":"welcome!"})" "\n");
-        //handler_->do_write(session);
         session->post_write(R"({"type":"notice","msg":"welcome!"})" "\n");
         });
 
@@ -80,24 +78,6 @@ MessageDispatcher::MessageDispatcher(DataHandler* handler) : handler_(handler) {
         // (원하면) 응답 필요 없으면 생략 가능
         // session->post_write(R"({"type":"pong"})" "\n");
         });
-
-    //register_handler("udp_register", [this](std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {
-    //    // 닉네임과 endpoint는 on_udp_receive에서 이미 처리됨. 추가로 할 일이 없다면 로그만!
-    //    std::string nickname = msg.value("nickname", "");
-    //    if (nickname.empty()) return;
-    //    g_logger->info("[UDP] udp_register received for nickname: {}", nickname);
-    //    // 필요하다면 별도 응답도 가능!
-    //        // 랜덤 토큰 생성 및 저장
-    //    std::string udp_token = generate_random_token();
-    //    session->set_udp_token(udp_token);
-
-    //    // 클라이언트에 토큰 전달
-    //    nlohmann::json response;
-    //    response["type"] = "udp_token";
-    //    response["token"] = udp_token;
-    //    response["msg"] = "UDP 인증 토큰 발급";
-    //    session->post_write(response.dump() + "\n");
-    //    });
 }
 
 void MessageDispatcher::dispatch(std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {

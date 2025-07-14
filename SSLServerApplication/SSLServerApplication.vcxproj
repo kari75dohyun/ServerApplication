@@ -147,6 +147,7 @@
     <ClCompile Include="UDPManager.cpp" />
     <ClCompile Include="Utility.cpp" />
     <ClCompile Include="Zone.cpp" />
+    <ClCompile Include="ZoneManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DataHandler.h" />
@@ -159,6 +160,7 @@
     <ClInclude Include="UDPManager.h" />
     <ClInclude Include="Utility.h" />
     <ClInclude Include="Zone.h" />
+    <ClInclude Include="ZoneManager.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

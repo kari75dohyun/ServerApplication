@@ -92,12 +92,20 @@ void SSLSession::close_session() {
     if (auto handler = data_handler_.lock()) {
         int zone_id = get_zone_id();
         if (zone_id > 0) {
-            auto it = handler->zones_.find(zone_id);
-            if (it != handler->zones_.end()) {
-                it->second->remove_session(shared_from_this());
+            auto zone = handler->get_zone(zone_id);
+            if (zone) {
+                zone->remove_session(shared_from_this());
                 g_logger->info("[ZONE] 세션 {} → ZONE {}에서 제거(종료)", session_id_, zone_id);
             }
         }
+        //int zone_id = get_zone_id();
+        //if (zone_id > 0) {
+        //    auto it = handler->zones_.find(zone_id);
+        //    if (it != handler->zones_.end()) {
+        //        it->second->remove_session(shared_from_this());
+        //        g_logger->info("[ZONE] 세션 {} → ZONE {}에서 제거(종료)", session_id_, zone_id);
+        //    }
+        //}
     }
 
     auto self = shared_from_this();
@@ -179,33 +187,6 @@ void SSLSession::post_write(const std::shared_ptr<std::string> msg) {
         }
         });
 }
-// (3) do_write_queue (shared_ptr<std::string> 사용)
-//void SSLSession::do_write_queue() {
-//    if (get_state() == SessionState::Closed) {
-//        g_logger->warn("Closed session: 콜백/메시지 무시 [session_id={}]", get_session_id());
-//        return;
-//    }
-//    auto self = shared_from_this();
-//    if (write_queue_.empty()) {
-//        write_in_progress_ = false;
-//        return;
-//    }
-//    auto msg = write_queue_.front(); // shared_ptr<std::string>
-//    boost::asio::async_write(socket_, boost::asio::buffer(*msg),
-//        boost::asio::bind_executor(strand_,
-//            [this, self](const boost::system::error_code& ec, std::size_t /*length*/) {
-//                if (!ec) {
-//                    write_queue_.pop();
-//                    do_write_queue(); // 다음 메시지 있으면 계속 write
-//                }
-//                else {
-//                    write_in_progress_ = false;
-//                    close_session();
-//                }
-//            }
-//        )
-//    );
-//}
 
 void SSLSession::do_write_queue() {
     if (get_state() == SessionState::Closed) return;
@@ -265,39 +246,6 @@ void SSLSession::on_nickname_registered() {
     set_state(SessionState::Ready); // 로그인 성공 상태로!
     login_timer_.cancel(); // 인수 제거하여 타이머 취소  
 }
-
-//void SSLSession::start_ping_sender() {
-//    if (closed_) return;
-//    ping_timer_.expires_after(ping_interval_);
-//    auto self = shared_from_this();
-//    ping_timer_.async_wait([this, self](const boost::system::error_code& ec) {
-//        if (!ec && !closed_) {
-//            std::cout << "[PING] session_id=" << session_id_ << " → 클라이언트로 ping 전송" << std::endl;
-//            post_write(R"({"type":"ping"})" "\n"); // 클라로 ping 전송
-//            start_ping_sender();
-//        }
-//        });
-//}
-//
-//void SSLSession::start_keepalive_timer() {
-//    if (closed_) return;
-//    keepalive_timer_.expires_after(keepalive_timeout_);
-//    auto self = shared_from_this();
-//    keepalive_timer_.async_wait([this, self](const boost::system::error_code& ec) {
-//        if (!ec && !closed_) {
-//            std::cout << "[KEEPALIVE TIMEOUT] session_id=" << session_id_
-//                << " → 일정 시간 pong 없음, 세션 종료" << std::endl;
-//            close_session();
-//        }
-//        });
-//}
-//
-//// 클라에서 pong 받으면 keepalive 타이머 리셋!
-//void SSLSession::on_pong_received() {
-//    if (closed_) return;
-//    keepalive_timer_.expires_after(keepalive_timeout_);
-//    // latency 측정 등 부가 기능도 구현 가능
-//}
 
 void SSLSession::reset(boost::asio::ip::tcp::socket&& new_socket, int session_id) {
     boost::system::error_code ec;

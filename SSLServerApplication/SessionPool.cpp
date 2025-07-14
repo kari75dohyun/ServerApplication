@@ -61,40 +61,6 @@ std::shared_ptr<SSLSession> SessionPool::acquire(boost::asio::ip::tcp::socket&& 
     return sess;
 }
 
-//std::shared_ptr<SSLSession> SessionPool::acquire(boost::asio::ip::tcp::socket&& socket, int session_id) {
-//    std::lock_guard<std::mutex> lock(mutex_);
-//
-//    size_t idx;
-//    if (available_indices_.empty()) {
-//        // 최대 확장치 초과 시 nullptr 반환!
-//        if (pool_.size() >= max_size_) {
-//            //std::cerr << "[SessionPool][ERROR] Max session pool size reached (" << max_size_ << "). New session rejected!" << std::endl;
-//            g_logger->error("[SessionPool][ERROR] Max session pool size reached ( {}", max_size_, "). New session rejected!");
-//            //std::cerr << "[SessionPool] 현재 풀 크기: " << pool_.size() << std::endl;
-//            g_logger->error("[SessionPool] 현재 풀 크기: {}", pool_.size());
-//            return nullptr;
-//        }
-//        idx = pool_.size();
-//        auto new_session = std::make_shared<SSLSession>(
-//            boost::asio::ip::tcp::socket(boost::asio::make_strand(io_)),
-//            context_, -1, handler_
-//        );
-//        pool_.push_back(new_session);
-//        std::cout << "[SessionPool] Pool auto-expanded: size=" << pool_.size() << " / 최대치: " << max_size_ << std::endl;
-//    }
-//    else {
-//        idx = available_indices_.front();
-//        available_indices_.pop();
-//    }
-//
-//    //std::cout << "[SessionPool][acquire] idx=" << idx << " (풀 총 세션 수: " << pool_.size() << ", 사용 중: " << (pool_.size() - available_indices_.size()) << ")" << std::endl;
-//    g_logger->info("[SessionPool][acquire] idx= {}", idx, " (풀 총 세션 수: {}", pool_.size(), ", 사용 중: {}", (pool_.size() - available_indices_.size()), ")");
-//
-//    auto& sess = pool_[idx];
-//    sess->reset(std::move(socket), session_id);
-//    return sess;
-//}
-
 void SessionPool::release(std::shared_ptr<SSLSession> session) {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -135,17 +101,3 @@ void SessionPool::release(std::shared_ptr<SSLSession> session) {
     g_logger->info("[SessionPool][release] idx={} 반환 (풀 총 세션 수: {}, 사용 중: {})",
         idx, pool_.size(), pool_.size() - available_indices_.size());
 }
-
-
-
-//// 세션 자동 확장 추가
-//void SessionPool::release(std::shared_ptr<SSLSession> session) {
-//    auto it = std::find(pool_.begin(), pool_.end(), session);
-//    if (it != pool_.end()) {
-//        size_t idx = std::distance(pool_.begin(), it);
-//        std::lock_guard<std::mutex> lock(mutex_);
-//        available_indices_.push(idx);
-//        //std::cout << "[SessionPool][release] idx=" << idx << " 반환 (풀 총 세션 수: " << pool_.size() << ", 사용 중: " << (pool_.size() - available_indices_.size()) << ")" << std::endl;
-//        g_logger->info("[SessionPool][release] idx= {}", idx, " 반환 (풀 총 세션 수: {}", pool_.size(), ", 사용 중: {}", pool_.size() - available_indices_.size(), ")");
-//    }
-//}

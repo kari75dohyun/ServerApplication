@@ -9,6 +9,7 @@
 #include "SessionPool.h"         // 세션 풀 헤더 추가
 #include <boost/asio/strand.hpp>
 #include "Zone.h"
+#include "ZoneManager.h" 
 
 class SSLSession;  // 전방 선언, SSLSession 클래스가 정의되기 전에 사용
 class SessionPool; // 전방 선언, SessionPool 클래스가 정의되기 전에 사용
@@ -53,6 +54,9 @@ private:
     bool udp_send_in_progress_ = false;
     std::unique_ptr<boost::asio::strand<boost::asio::any_io_executor>> udp_send_strand_;
     void try_send_next_udp(boost::asio::ip::udp::socket& udp_socket);
+
+    boost::asio::io_context& io_context_; // (신규 멤버)
+    ZoneManager zone_manager_;            // (신규 멤버)
 
 public:
     DataHandler(boost::asio::io_context& io, int zone_count = MAX_ZONE_COUNT); // 생성자 선언 필요!
@@ -154,7 +158,7 @@ public:
 	}
 
     // zone, channel, room별로 나눈다.
-    std::unordered_map<int, std::shared_ptr<Zone>> zones_;
+    //std::unordered_map<int, std::shared_ptr<Zone>> zone_manager_; //zones_;
     void assign_session_to_zone(std::shared_ptr<SSLSession> session, int zone_id);  // zone 배정 함수
     void udp_broadcast_zone(int zone_id, const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname);
 
