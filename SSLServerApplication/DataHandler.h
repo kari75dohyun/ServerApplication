@@ -5,17 +5,21 @@
 #include <memory>
 #include <mutex>
 #include <functional>
+#include "SessionManager.h"
 #include "MessageDispatcher.h"   // 추가!
 #include "SessionPool.h"         // 세션 풀 헤더 추가
 #include <boost/asio/strand.hpp>
 #include "Zone.h"
-#include "ZoneManager.h" 
+#include "ZoneManager.h"
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
 
 class SSLSession;  // 전방 선언, SSLSession 클래스가 정의되기 전에 사용
 class SessionPool; // 전방 선언, SessionPool 클래스가 정의되기 전에 사용
 class Zone;
+class SessionManager;
 
-#include "Zone.h" // Add this include to resolve the incomplete type error for "Zone"
 class DataHandler {
 private:
     static constexpr int UDP_EXPIRE_TIMEOUT_SECONDS = 300;  // UDP 만료 시간 제한(초)
@@ -23,18 +27,14 @@ private:
     static constexpr size_t TOTAL_LIMIT_PER_SEC = 1000;     // 1초에 전체 1000패킷 제한
 	static constexpr size_t MAX_ZONE_COUNT = 10;            // 최대 존 개수
     static constexpr size_t kMaxUdpQueueSize = 10000;       // 필요에 따라 값 조정
-	static constexpr size_t MAX_ZONE_SESSION_COUNT = 300; // 최대 ZONE 세션 개수
+	static constexpr size_t MAX_ZONE_SESSION_COUNT = 500;   // 최대 ZONE 세션 개수
 
     unsigned int shard_count = 0;
-    std::vector<std::unordered_map<int, std::shared_ptr<SSLSession>>> session_buckets;
-    std::vector<std::mutex> session_mutexes;
-
-    int get_shard(int session_id) const {
-        return session_id % shard_count;
-    }
 
     // 함수포인터(람다) 기반 Dispatcher
     MessageDispatcher dispatcher_;
+
+    std::shared_ptr<SessionManager> session_manager_; // SessionManager 멤버 추가
 
     std::shared_ptr<SessionPool> session_pool_;  // 세션 풀 멤버 추가  
 
@@ -55,34 +55,24 @@ private:
     std::unique_ptr<boost::asio::strand<boost::asio::any_io_executor>> udp_send_strand_;
     void try_send_next_udp(boost::asio::ip::udp::socket& udp_socket);
 
-    boost::asio::io_context& io_context_; // (신규 멤버)
-    ZoneManager zone_manager_;            // (신규 멤버)
+	boost::asio::io_context& io_context_; // ZoneManager 생성에 필요
+	ZoneManager zone_manager_;            // Zoneanager 멤버 추가
+
+    boost::asio::steady_timer monitor_timer_; // 모니터링 타이머
 
 public:
-    DataHandler(boost::asio::io_context& io, int zone_count = MAX_ZONE_COUNT); // 생성자 선언 필요!
+    DataHandler(boost::asio::io_context& io, std::shared_ptr<SessionManager> session_manager, int zone_count = MAX_ZONE_COUNT); // 생성자 선언 필요!
     // *** 여기! 복사 금지 선언 추가 ***
     DataHandler(const DataHandler&) = delete;
     DataHandler& operator=(const DataHandler&) = delete;
 
+    void dispatch(const std::shared_ptr<SSLSession>& session, const json& msg);
     // TCP/SSL 세션 관리 
     // 세션 추가
     void add_session(int session_id, std::shared_ptr<SSLSession> session);
 
     // 세션 제거
     void remove_session(int session_id);
-
-    // 세션 찾기
-    // std::shared_ptr<SSLSession> get_session(int session_id) const;
-    std::shared_ptr<SSLSession> get_session(int session_id);
-
-    // SSL 핸드쉐이크를 비동기적으로 수행하는 함수
-    void do_handshake(std::shared_ptr<SSLSession> session);
-
-    // 데이터 읽기
-    void do_read(std::shared_ptr<SSLSession> session);
-
-    // 데이터 쓰기
-    //void do_write(std::shared_ptr<SSLSession> session);
 
     // 브로드캐스트 메시지 전송
     void broadcast(const std::string& msg, int sender_session_id, std::shared_ptr<SSLSession> session);
@@ -93,27 +83,8 @@ public:
 
     // 전체 세션을 정확하게 순회하는 함수(콜백 전달 방식)
     void for_each_session(const std::function<void(const std::shared_ptr<SSLSession>&)> fn);
-    size_t get_total_session_count();
 
     void broadcast_strict(const std::string& msg);
-
-    //(샤드 전체 락 + 일관된 순회)
-    template<typename Func>
-    void for_each_session(Func&& func) {
-        std::vector<std::shared_ptr<SSLSession>> sessions;
-        {
-            std::vector<std::unique_lock<std::mutex>> locks;
-            locks.reserve(shard_count);
-            for (unsigned int shard = 0; shard < shard_count; ++shard)
-                locks.emplace_back(session_mutexes[shard]);
-            for (unsigned int shard = 0; shard < shard_count; ++shard)
-                for (const auto& [id, sess] : session_buckets[shard])
-                    sessions.push_back(sess);
-        }
-        for (const auto& sess : sessions) {
-            func(sess);
-        }
-    }
 
     // 세션 풀에 대한 getter 추가  
     std::shared_ptr<SessionPool> get_session_pool() const {
@@ -125,8 +96,6 @@ public:
         session_pool_ = std::move(pool);
     }
 
-    void register_nickname(const std::string& nickname, std::shared_ptr<SSLSession> session);
-    void unregister_nickname(const std::string& nickname, std::shared_ptr<SSLSession> session);
     std::shared_ptr<SSLSession> find_session_by_nickname(const std::string& nickname);
 
     // 글로벌 keepalive 관련
@@ -158,9 +127,10 @@ public:
 	}
 
     // zone, channel, room별로 나눈다.
-    //std::unordered_map<int, std::shared_ptr<Zone>> zone_manager_; //zones_;
     void assign_session_to_zone(std::shared_ptr<SSLSession> session, int zone_id);  // zone 배정 함수
     void udp_broadcast_zone(int zone_id, const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname);
 
     std::shared_ptr<Zone> get_zone(int zone_id);
+
+	void start_monitor_loop(); // 모니터링 루프 시작 함수
 };

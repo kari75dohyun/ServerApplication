@@ -6,10 +6,12 @@
 #include <random>
 #include <sstream>
 #include "Utility.h"
+#include <nlohmann/json.hpp>
 
 using namespace std;
 using namespace boost::asio;
 using boost::asio::ip::tcp;
+using json = nlohmann::json;
 
 SSLSession::SSLSession(tcp::socket socket, ssl::context& context, int session_id, weak_ptr<DataHandler> data_handler)
     : socket_(std::move(socket), context),
@@ -17,7 +19,8 @@ SSLSession::SSLSession(tcp::socket socket, ssl::context& context, int session_id
     data_handler_(data_handler),
     strand_(boost::asio::make_strand(socket_.get_executor())),
     ssl_context_(context),
-    login_timer_(strand_) {
+    login_timer_(strand_),
+    retry_timer_(strand_) {
     // Session에서 각자 keepalive 타이머를 관리 하는 방식
     //ping_timer_(socket_.get_executor()),
     //keepalive_timer_(socket_.get_executor()) {
@@ -35,7 +38,8 @@ SSLSession::~SSLSession() {
 void SSLSession::start() {
     auto self(shared_from_this());
     if (auto handler = data_handler_.lock()) {
-        handler->do_handshake(self);
+        //handler->do_handshake(self);
+        do_handshake(0);
         start_login_timeout();    // 타이머 시작 추가!
         //start_ping_sender();      // 서버에서 ping 를 보낸다.
         //start_keepalive_timer();  // 핸드쉐이크 후 keepalive 타이머 시작
@@ -83,86 +87,6 @@ void SSLSession::run_next_task() {
     fn();  // 비동기 작업 진입, 콜백 마지막에 run_next_task() 호출!
 }
 
-void SSLSession::close_session() {
-    if (closed_.exchange(true)) return;
-    set_state(SessionState::Closed);    // 세션 상태 종료로!
-    clear_udp_endpoint();
-
-    // ZONE 에서 세션 제거
-    if (auto handler = data_handler_.lock()) {
-        int zone_id = get_zone_id();
-        if (zone_id > 0) {
-            auto zone = handler->get_zone(zone_id);
-            if (zone) {
-                zone->remove_session(shared_from_this());
-                g_logger->info("[ZONE] 세션 {} → ZONE {}에서 제거(종료)", session_id_, zone_id);
-            }
-        }
-        //int zone_id = get_zone_id();
-        //if (zone_id > 0) {
-        //    auto it = handler->zones_.find(zone_id);
-        //    if (it != handler->zones_.end()) {
-        //        it->second->remove_session(shared_from_this());
-        //        g_logger->info("[ZONE] 세션 {} → ZONE {}에서 제거(종료)", session_id_, zone_id);
-        //    }
-        //}
-    }
-
-    auto self = shared_from_this();
-    try {
-        // SSL 종료 핸드쉐이크 (async_shutdown) 먼저 호출
-        socket_.async_shutdown(
-            boost::asio::bind_executor(strand_,
-                [this, self](const boost::system::error_code& ec) {
-                    if (ec && ec != boost::asio::error::eof) {
-                        g_logger->error("[close_session] async_shutdown error: {}", ec.message());
-
-                        // 재시도 로직: 3회까지 시도
-                        int retry = 0;
-                        boost::system::error_code ec_retry;
-                        while (retry < 3 && ec) {
-                            ++retry;
-                            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                            socket_.lowest_layer().shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec_retry);
-                            if (!ec_retry) break;
-                        }
-                        if (ec_retry) {
-                            g_logger->error("[close_session] async_shutdown 3회 재시도 실패: {}", ec_retry.message());
-                            // 필요하다면 관리자 알람, 강제 세션 정리 등 추가
-                        }
-                    }
-
-                    // TCP 소켓 안전하게 닫기 (재시도 내장)
-                    boost::system::error_code ec2;
-                    int close_retry = 0;
-                    while (close_retry < 3) {
-                        socket_.lowest_layer().close(ec2);
-                        if (!ec2) break;
-                        g_logger->warn("[close_session] tcp close error ({}회차): {}", close_retry + 1, ec2.message());
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                        ++close_retry;
-                    }
-                    if (ec2) {
-                        g_logger->error("[close_session] tcp close error (최종실패): {}", ec2.message());
-                        // 필요시 실시간 알람/추가 복원로직 send_admin_alert 등
-                    }
-
-                    // remove_session을 마지막에 호출
-                    if (auto handler = data_handler_.lock()) {
-                        handler->remove_session(session_id_);
-                    }
-                }
-            )
-        );
-    }
-    catch (const std::exception& e) {
-        g_logger->error("[close_session] Exception: {}", e.what());
-		// 예외 발생시 슬랙으로 관리자 알람 등 추가 처리 
-        send_admin_alert(std::string("[close_session] Exception: ") + e.what());
-    }
-}
-
-
 // (1) post_write(기존 string용 → shared_ptr 버전으로 변환해서 호출)
 void SSLSession::post_write(const std::string& msg) {
     post_write(std::make_shared<std::string>(msg));
@@ -209,6 +133,7 @@ void SSLSession::do_write_queue() {
 
                     if (ec) {
                         g_logger->error("[do_write_queue] error: {}", ec.message());
+                        //close_session();
                         close_session();
                         return;
                     }
@@ -217,6 +142,7 @@ void SSLSession::do_write_queue() {
                 }
                 catch (const std::exception& e) {
                     g_logger->error("[do_write_queue][Exception] {}", e.what());
+                    //close_session();
                     close_session();
                 }
             }
@@ -224,18 +150,18 @@ void SSLSession::do_write_queue() {
     );
 }
 
-
 void SSLSession::start_login_timeout() {
     if (get_state() == SessionState::Closed) {
-        g_logger->warn("Closed session: 콜백/메시지 무시 [session_id={}]", get_session_id());
+        g_logger->warn("Closed session: Callback/Ignore Message [session_id={}]", get_session_id());
         return;
     }
     login_timer_.expires_after(std::chrono::seconds(LOGIN_TIMEOUT_SECONDS)); // 예: 90초
     auto self = shared_from_this();
     login_timer_.async_wait([this, self](const boost::system::error_code& ec) {
         if (!ec && !nickname_registered_) {
-            std::cerr << "[LOGIN TIMEOUT] session_id=" << session_id_ << " 로그인 시간 초과, 세션 종료!" << std::endl;
-            post_write(R"({"type":"notice","msg":"로그인 시간이 초과되어 연결이 종료됩니다."})" "\n");
+            std::cerr << "[LOGIN TIMEOUT] session_id=" << session_id_ << " Login timed out, session ended!" << std::endl;
+            post_write(R"({"type":"notice","msg":"Your connection has been terminated due to a login timeout."})" "\n");
+            //close_session();
             close_session();
         }
         });
@@ -357,4 +283,183 @@ void SSLSession::enqueue_write(std::shared_ptr<std::string> msg) {
 
     // 3. push
     write_queue_.push(msg);
+}
+
+void SSLSession::close_session() {
+    if (closed_.exchange(true)) return;
+    set_state(SessionState::Closed);    // 세션 상태 종료로!
+
+    auto self = shared_from_this();
+    try {
+        // ⭐️ SSL 종료 핸드쉐이크 (async_shutdown) 먼저 호출
+        socket_.async_shutdown(
+            boost::asio::bind_executor(strand_,
+                [this, self](const boost::system::error_code& ec) {
+                    if (ec) {
+                        //std::cerr << "[close_session] async_shutdown error: " << ec.message() << std::endl;
+                        //LOG_ERROR("[close_session] async_shutdown error: ", ec.message());
+                        g_logger->error("[close_session] async_shutdown error: {}", ec.message());
+                    }
+
+                    // TCP 소켓 안전하게 닫기
+                    boost::system::error_code ec2;
+                    socket_.lowest_layer().shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec2);
+                    if (ec2) g_logger->error("[close_session] tcp shutdown error: {}", ec2.message()); //LOG_ERROR("[close_session] tcp shutdown error: ", ec2.message());  //std::cerr << "[close_session] tcp shutdown error: " << ec2.message() << std::endl;
+                    socket_.lowest_layer().close(ec2);
+                    if (ec2) g_logger->error("[close_session] tcp close error: {}", ec2.message()); //LOG_ERROR("[close_session] tcp close error: ", ec2.message());//std::cerr << "[close_session] tcp close error: " << ec2.message() << std::endl;
+
+                    // ⭐️ remove_session을 마지막에 호출 (release 등 포함)
+                    if (auto handler = data_handler_.lock()) {
+                        handler->remove_session(session_id_);
+                    }
+                }
+            )
+        );
+    }
+    catch (const std::exception& e) {
+        //std::cerr << "[close_session] Exception: " << e.what() << std::endl;
+        //LOG_ERROR("[close_session] Exception: ", e.what());
+        g_logger->error("[close_session] Exception: {}", e.what());
+    }
+}
+
+void SSLSession::do_handshake(int retry_count)
+{
+    auto self = shared_from_this();
+    socket_.async_handshake(boost::asio::ssl::stream_base::server,
+        boost::asio::bind_executor(strand_,
+            [this, self, retry_count](const boost::system::error_code& ec) {
+                if (!ec) {
+                    // 핸드쉐이크 성공 -> 정상처리
+                    set_state(SessionState::LoginWait);
+                    set_message(R"({"type":"notice","msg":"Enter your nickname:"})" "\n");
+                    //do_write(self);
+                    post_write(self->get_message());
+                    do_read(); //반드시 필요!
+                }
+                else if (retry_count < kMaxCloseRetries) {
+                    g_logger->warn("[handshake][retry] failed: {}, retry_count={}", ec.message(), retry_count + 1);
+                    retry_timer_.expires_after(std::chrono::milliseconds(kRetryDelayMs));
+                    retry_timer_.async_wait(boost::asio::bind_executor(strand_,
+                        [this, self, retry_count](const boost::system::error_code& timer_ec) {
+                            if (!timer_ec) do_handshake(retry_count + 1);
+                        }
+                    ));
+                }
+                else {
+                    g_logger->error("[handshake][retry] 3회 재시도 실패, 세션 종료");
+                    close_session();
+                }
+            }
+        )
+    );
+}
+
+void SSLSession::do_read() 
+{
+    auto self = shared_from_this();
+    // [1] 중복 read 방지!
+    if (get_state() == SessionState::Closed) {
+        g_logger->warn("Closed session: 콜백/메시지 무시 [session_id={}]", get_session_id());
+        return;
+    }
+    if (!try_acquire_read()) {
+        //cerr << "[WARN] 중복 do_read 감지! session_id=" << session->get_session_id() << endl;
+        g_logger->info("[WARN] 중복 do_read 감지! session_id= {}", get_session_id());
+        return;
+    }
+    // do_read를 직접 호출하지 않고, post_task로 감싼다.
+    post_task([this, self]() {
+        auto& strand = get_strand();
+        get_socket().async_read_some(
+            buffer(get_data(), sizeof(get_data())),
+            boost::asio::bind_executor(strand, [this, self](const boost::system::error_code& ec, size_t length) {
+                // [2] 콜백 진입 시 반드시 해제!
+                release_read();
+
+                try {
+                    if (!ec) {
+                        // 1. 누적 버퍼에 append
+                        get_msg_buffer().append(get_data(), length);
+
+                        // 2. 여러 메시지 추출 및 처리
+                        while (auto opt_msg = get_msg_buffer().extract_message()) {
+                            try {
+                                //cout << "[DEBUG] dispatching message" << endl;
+                                json msg = json::parse(*opt_msg);
+                                if (auto handler = data_handler_.lock()) {
+                                    handler->dispatch(self, msg);  // 바로 이렇게!
+                                }
+                                //dispatcher_.dispatch(self, msg);
+                            }
+                            catch (const exception& e) {
+                                cerr << "[JSON parsing error] " << e.what() << " / data: " << *opt_msg << endl;
+                                set_message(R"({"type":"error","msg":"Message parsing failed"})" "\n");
+                                //do_write(self);
+                                post_write(get_message());
+                                // 에러 시에도 계속 다음 메시지 분리/처리
+                            }
+                        }
+
+                        // 3. 계속해서 read (이 구조면 wrote 체크 필요 없음)
+                        do_read();
+                    }
+                    else if (ec == boost::asio::error::eof) {
+                        cout << "Client disconnected." << endl;
+                        // 퇴장 알림
+                        string nickname = self->get_nickname();
+                        json notice;
+                        notice["type"] = "notice";
+                        notice["msg"] = nickname + " has left.";
+                        // broadcast는 data_handler로 위임
+                        if (auto handler = data_handler_.lock()) {
+                            handler->broadcast(notice.dump() + "\n", get_session_id(), self);
+                        }
+                        //broadcast(notice.dump() + "\n", self->get_session_id(), self);
+
+                        self->close_session();  // 세션 종료
+                    }
+                    else if (ec == boost::asio::error::connection_reset) {
+                        cout << "Client forcibly disconnected." << endl;
+                        string nickname = self->get_nickname();
+                        if (nickname.empty()) {
+                            g_logger->warn("[Connection reset] Client disconnected without a nickname. {}", self->get_session_id());
+                            cerr << "Client disconnected without a nickname." << endl;
+                        }
+                        else {
+                            json notice;
+                            notice["type"] = "notice";
+                            notice["msg"] = nickname + " has left.";
+                            // broadcast는 data_handler로 위임
+                            if (auto handler = data_handler_.lock()) {
+                                handler->broadcast(notice.dump() + "\n", get_session_id(), self);
+                            }
+                            //broadcast(notice.dump() + "\n", self->get_session_id(), self);
+                            std::cout << "Client with nickname '" << nickname << "' disconnected." << std::endl;
+                        }
+
+                        //self->close_session();
+                        close_session();
+                    }
+                    else if (ec == boost::asio::error::operation_aborted) {
+                        // [995] 소켓 종료, 타이머 취소 등에서 발생하는 "정상 종료 케이스"
+                        // cout << "[INFO] Read cancelled by server shutdown or session close." << endl;
+                        // 로그를 아예 안 찍거나, INFO/DEBUG로만 출력
+                    }
+                    else {
+                        cerr << "Read failed: [" << ec.value() << "] " << ec.message() << endl;
+                        //self->close_session();
+                        close_session();
+                    }
+                }
+                catch (const exception& e) {
+                    cerr << "[FATAL][do_read handler 예외] " << e.what() << endl;
+                    //self->close_session();
+                    close_session();
+                }
+                self->run_next_task(); // 항상 마지막에!
+
+                })
+        );
+        });
 }

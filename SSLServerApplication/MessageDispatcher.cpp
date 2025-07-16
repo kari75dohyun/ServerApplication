@@ -1,24 +1,35 @@
-﻿#include "MessageDispatcher.h"
+﻿#include <iostream>
+#include "MessageDispatcher.h"
 #include "SSLSession.h"
 #include "DataHandler.h"
-#include <iostream>
 #include "Logger.h"
 #include <memory>
 #include "Utility.h"
 //#include <fstream>
 
-MessageDispatcher::MessageDispatcher(DataHandler* handler) : handler_(handler) {
+MessageDispatcher::MessageDispatcher(DataHandler* handler, SessionManager* sessionmanager) : handler_(handler), session_manager_(sessionmanager){
     // "login" 핸들러 등록
     register_handler("login", [this](std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {
         std::string nickname = msg.value("nickname", "anonymity");
 
+        if (nickname == "quit") {
+            session->post_write(R"({"type":"logout","msg":"You are not logged in."})" "\n");
+            g_logger->warn("[Connection reset] Client disconnected without a nickname. session_id : {} ", session->get_session_id());
+            std::cerr << "Client disconnected without a nickname. " << " session_id: " << session->get_session_id() << std::endl;
+            session->close_session();
+			return;
+        }
+
         // [중복 검사/처리]
-        auto prev = handler_->find_session_by_nickname(nickname);
+        auto prev = session_manager_->find_session_by_nickname(nickname); //handler_->find_session_by_nickname(nickname);
         if (prev && prev != session) {
-            prev->post_write(R"({"type":"error","msg":"다른 곳에서 로그인되어 기존 연결이 종료됩니다."})" "\n");
+            prev->post_write(R"({"type":"error","msg":"Duplicate login ban"})" "\n");
             prev->close_session();
         }
-        handler_->register_nickname(nickname, session);
+        //handler_->register_nickname(nickname, session);
+        g_logger->info("[on_login] {} 세션 등록 시도", nickname);
+        session_manager_->register_nickname(nickname, session);
+        g_logger->info("[on_login] 세션 등록 완료 후 login_success 전송: {}", nickname);
 
         session->set_nickname(nickname);
         session->on_nickname_registered(); // 닉네임 등록시 타이머 중지
@@ -32,8 +43,31 @@ MessageDispatcher::MessageDispatcher(DataHandler* handler) : handler_(handler) {
         notice["msg"] = nickname + " has entered.";
         handler_->broadcast(notice.dump() + "\n", session->get_session_id(), session);
 
-        session->post_write(R"({"type":"notice","msg":"welcome!"})" "\n");
+        nlohmann::json login_msg;
+        login_msg["type"] = "login_success";
+        login_msg["nickname"] = nickname;
+        session->post_write(login_msg.dump() + "\n");
         });
+
+    register_handler("logout", [this](std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {
+        std::string nickname = session->get_nickname();
+        if (nickname.empty()) {
+            session->post_write(R"({"type":"logout","msg":"You are not logged in."})" "\n");
+            g_logger->warn("[Connection reset] Client disconnected without a nickname. session_id : {} ", session->get_session_id());
+            std::cerr << "Client disconnected without a nickname. " << " session_id: " << session->get_session_id() << std::endl;
+            session->close_session();
+            return;
+        }
+        nlohmann::json notice;
+        notice["type"] = "notice";
+        notice["msg"] = nickname + " has left.";
+        handler_->broadcast(notice.dump() + "\n", session->get_session_id(), session);
+        // 세션 종료
+        session->post_write(R"({"type":"logout","msg":"You quit normally."})" "\n");
+        g_logger->warn("[Connection reset] Client disconnected. nickname: {} session_id : {}", nickname, session->get_session_id());
+        std::cerr << "Client disconnected. " << "  nickname: " << nickname << "  session_id: " << session->get_session_id() << std::endl;
+        session->close_session();
+		});
 
     // "chat" 핸들러 등록
     register_handler("chat", [this](std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {
@@ -44,15 +78,6 @@ MessageDispatcher::MessageDispatcher(DataHandler* handler) : handler_(handler) {
         send_msg["type"] = "chat";
         send_msg["from"] = nickname;
         send_msg["msg"] = chat_msg;
-
-        // 한글 채팅 데이터 안깨지는 확인
-        //std::cout << "HEX: ";
-        //for (unsigned char c : chat_msg) printf("%02X ", c);
-        //std::cout << std::endl;
-
-        //std::ofstream ofs("chat_msg.txt", std::ios::binary);
-        //ofs << chat_msg;
-        //ofs.close();
 
         handler_->broadcast(send_msg.dump() + "\n", session->get_session_id(), session);
 
@@ -148,6 +173,7 @@ void MessageDispatcher::dispatch_udp(std::shared_ptr<SSLSession> session, const 
         response["token"] = udp_token;
         response["nickname"] = jmsg.value("nickname", "anonymity");
 
+        g_logger->info("[DEBUG][UDP] 응답 전송 - endpoint: {}:{}", from.address().to_string(), from.port());
         auto data = std::make_shared<std::string>(response.dump());
         udp_socket.async_send_to(
             boost::asio::buffer(*data), from,

@@ -13,8 +13,6 @@ class Zone : public std::enable_shared_from_this<Zone> {
 private:
     size_t max_sessions_;  // zoen 입장 인원 최대 300명
     int zone_id_;
-    //std::unordered_set<std::shared_ptr<SSLSession>> sessions_;
-    //std::unordered_set<SSLSession*> sessions_;
     std::unordered_map<int, std::weak_ptr<SSLSession>> sessions_;
 
 public:

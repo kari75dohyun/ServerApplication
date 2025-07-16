@@ -1,5 +1,4 @@
 ﻿#pragma once
-
 #include "DataHandler.h"
 #include "MessageBufferManager.h"
 #include <boost/asio.hpp>
@@ -13,14 +12,17 @@
 
 class DataHandler;  // 전방 선언: DataHandler 클래스
 
-enum class SessionState { Handshaking, LoginWait, Ready, Closed };
+enum class SessionState { Handshaking, Handshaked, LoginWait, Ready, Closed };
+
+const int kMaxCloseRetries = 3;   // 재시도 횟수
+const int kRetryDelayMs = 100;  // 재시도 간격(ms)
 
 // SSL 세션을 관리하는 클래스
 class SSLSession : public std::enable_shared_from_this<SSLSession> {
 private:
     static constexpr size_t MAX_WRITE_QUEUE = 1000;
     static constexpr size_t MAX_TASK_QUEUE = 1000;
-    static constexpr int LOGIN_TIMEOUT_SECONDS = 30;  // 로그인 제한(초)
+    static constexpr int LOGIN_TIMEOUT_SECONDS = 90;  // 로그인 제한(초)
 
     size_t write_queue_overflow_count_ = 0;          // 연속 overflow count
 
@@ -76,6 +78,7 @@ private:
     int zone_id_ = 0; // 기본 0 = 미배정
 
     std::atomic<uint64_t> generation_{ 0 };   // generation: reset시 증가
+    std::atomic<bool> active_{ false };   // 활성 세션 여부
 
 public:
     // 생성자: 클라이언트 소켓과 SSL 컨텍스트를 받아 SSL 스트림을 초기화
@@ -115,7 +118,7 @@ public:
     // 라인 버퍼를 가져오는 함수
     std::string& get_line_buffer() { return line_buffer_; }
     // 클라이언트 연결 종료 시 세션 종료
-    void close_session();
+    //void close_session();
 
     // 중복 do_read 체크 함수
     bool try_acquire_read() {
@@ -207,6 +210,14 @@ public:
 
     uint64_t get_generation() const { return generation_.load(); }
     void increment_generation() { ++generation_; }
+	// 활성 세션 여부 설정 및 조회
+    void set_active(bool v) { active_ = v; }
+    bool is_active() const { return active_.load(); }
+
+    boost::asio::steady_timer retry_timer_;  // 재시도 타이머
+    void close_session();
+    void do_handshake(int retry_count = 0);
+    void do_read();
 
 private:
     void do_write_queue();

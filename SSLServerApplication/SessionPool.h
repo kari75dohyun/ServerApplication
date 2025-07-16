@@ -15,6 +15,9 @@ public:
     // 세션 반환(재사용)
     void release(std::shared_ptr<SSLSession> session);
     size_t pool_size() const { return pool_.size(); }  // 현재 풀 크기 반환
+	// 현재 사용 가능한 세션 수 반환
+    void for_each_active(const std::function<void(const std::shared_ptr<SSLSession>&)>& fn);
+    size_t count_active();
 
 private:
     std::vector<std::shared_ptr<SSLSession>> pool_;

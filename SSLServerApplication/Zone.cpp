@@ -10,45 +10,33 @@ Zone::Zone(boost::asio::io_context& io, int zone_id, size_t max_sessions)
 
 void Zone::broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname) {
     auto self = shared_from_this();
+
     boost::asio::dispatch(strand_, [this, self, msg, &udp_socket, sender_nickname]() {
-        // === UDP 큐 길이 제한 ===
-        while (udp_send_queue_.size() >= kMaxUdpQueueSize) {
-            g_logger->warn("[UDP][Zone] Send queue overflow (zone_id={}, size={}), dropping oldest", zone_id_, udp_send_queue_.size());
-            udp_send_queue_.pop();
+        // 1. 복사할 벡터 선언
+        std::vector<std::tuple<std::shared_ptr<SSLSession>, boost::asio::ip::udp::endpoint>> targets;
+
+        {
+            std::lock_guard<std::mutex> lock(session_mutex_);
+            for (auto it = sessions_.begin(); it != sessions_.end(); ++it) {
+                std::shared_ptr<SSLSession> sess = it->second.lock();
+                if (!sess) continue;
+                if (sess->get_nickname() == sender_nickname) continue;
+                auto udp_ep = sess->get_udp_endpoint();
+                if (udp_ep) {
+                    targets.emplace_back(sess, *udp_ep); // weak_ptr->shared_ptr
+                }
+            }
+            // 여기서 락 즉시 해제
         }
 
-        //if (udp_send_queue_.size() > kMaxUdpQueueSize) {
-        // 정책1: 새 메시지 drop
-        //g_logger->warn("[UDP][Zone] Send queue overflow (zone_id={}, size={}) - dropping message", zone_id_, udp_send_queue_.size());
-        //return;
-
-        // 세션 락!
-        std::lock_guard<std::mutex> lock(session_mutex_);
-
-        // map 순회 & weak_ptr->shared_ptr 안전 획득
-        for (auto it = sessions_.begin(); it != sessions_.end(); ) {
-            std::shared_ptr<SSLSession> sess = it->second.lock();
-            if (!sess) {
-                // 세션 소멸: map에서 clean up
-                it = sessions_.erase(it);
-                continue;
-            }
-            if (sess->get_nickname() == sender_nickname) {
-                ++it;
-                continue;
-            }
-            auto udp_ep = sess->get_udp_endpoint();
-            if (udp_ep) {
-                auto data = std::make_shared<std::string>(msg);
-                udp_send_queue_.emplace(data, *udp_ep);
-            }
-            ++it;
+        // 2. 이제 락 없이 send queue에 메시지 push/send
+        for (auto& [sess, ep] : targets) {
+            auto data = std::make_shared<std::string>(msg);
+            udp_socket.async_send_to(boost::asio::buffer(*data), ep,
+                [data](const boost::system::error_code&, std::size_t) {/*...*/});
         }
-
-        try_send_next(udp_socket);
         });
 }
-
 
 void Zone::try_send_next(boost::asio::ip::udp::socket& udp_socket) {
     auto self = shared_from_this();

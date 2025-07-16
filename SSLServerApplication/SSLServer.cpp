@@ -11,6 +11,7 @@ using namespace boost::asio;
 
 SSLServer::SSLServer(boost::asio::io_context& io, short port, ssl::context& context, shared_ptr<DataHandler> data_handler, std::shared_ptr<SessionPool> session_pool)
     : acceptor_(io, tcp::endpoint(tcp::v4(), port)), context_(context), session_counter_(0), data_handler_(data_handler), session_pool_(session_pool) {
+    //acceptor_.listen(2048);
     start_accept();
 }
 

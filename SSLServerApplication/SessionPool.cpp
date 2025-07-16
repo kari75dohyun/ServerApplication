@@ -46,16 +46,19 @@ std::shared_ptr<SSLSession> SessionPool::acquire(boost::asio::ip::tcp::socket&& 
 
         // 중복 할당 방지: 이미 사용중인 세션이 아닌지 확인 (상태 플래그 등으로 더 엄격하게 할 수도 있음)
         auto& sess = pool_[idx];
-        if (sess.use_count() != 1) { // 참조 카운트가 1이 아니라면 이미 어딘가에서 사용중
+        //if (sess.use_count() != 1) { // 참조 카운트가 1이 아니라면 이미 어딘가에서 사용중
+		if (sess->is_active()) { // 세션이 활성화 상태라면
             g_logger->warn("[SessionPool][acquire] idx={} 세션이 이미 사용중! 강제 reset 시도", idx);
 #ifndef NDEBUG
             assert(false && "SessionPool::acquire: 중복 acquire 감지");
 #endif
+            sess->close_session();
         }
     }
 
     auto& sess = pool_[idx];
     sess->reset(std::move(socket), session_id);
+    sess->set_active(true); // 세션 활성화!
 
     g_logger->info("[SessionPool][acquire] idx={} (풀 총 세션 수: {}, 사용 중: {})", idx, pool_.size(), pool_.size() - available_indices_.size());
     return sess;
@@ -97,7 +100,26 @@ void SessionPool::release(std::shared_ptr<SSLSession> session) {
     }
 
     // 3. 정상 반환
+    session->set_active(false);
     available_indices_.push(idx);
     g_logger->info("[SessionPool][release] idx={} 반환 (풀 총 세션 수: {}, 사용 중: {})",
         idx, pool_.size(), pool_.size() - available_indices_.size());
+}
+
+void SessionPool::for_each_active(const std::function<void(const std::shared_ptr<SSLSession>&)>& fn) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& sess : pool_) {
+        if (sess->is_active())
+            fn(sess);
+    }
+}
+
+size_t SessionPool::count_active() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    size_t cnt = 0;
+    for (auto& sess : pool_) {
+        if (sess->is_active())
+            ++cnt;
+    }
+    return cnt;
 }

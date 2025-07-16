@@ -140,6 +140,7 @@
     <ClCompile Include="Logger.cpp" />
     <ClCompile Include="MessageBufferManager.cpp" />
     <ClCompile Include="MessageDispatcher.cpp" />
+    <ClCompile Include="SessionManager.cpp" />
     <ClCompile Include="SessionPool.cpp" />
     <ClCompile Include="SSLServer.cpp" />
     <ClCompile Include="SSLServerApplication.cpp" />
@@ -154,6 +155,7 @@
     <ClInclude Include="Logger.h" />
     <ClInclude Include="MessageBufferManager.h" />
     <ClInclude Include="MessageDispatcher.h" />
+    <ClInclude Include="SessionManager.h" />
     <ClInclude Include="SessionPool.h" />
     <ClInclude Include="SSLServer.h" />
     <ClInclude Include="SSLSession.h" />
