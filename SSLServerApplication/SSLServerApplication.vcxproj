@@ -140,6 +140,7 @@
     <ClCompile Include="Logger.cpp" />
     <ClCompile Include="MessageBufferManager.cpp" />
     <ClCompile Include="MessageDispatcher.cpp" />
+    <ClCompile Include="MessageHandlers\ChatHandler.cpp" />
     <ClCompile Include="SessionManager.cpp" />
     <ClCompile Include="SessionPool.cpp" />
     <ClCompile Include="SSLServer.cpp" />
@@ -155,6 +156,7 @@
     <ClInclude Include="Logger.h" />
     <ClInclude Include="MessageBufferManager.h" />
     <ClInclude Include="MessageDispatcher.h" />
+    <ClInclude Include="MessageHandlers\ChatHandler.h" />
     <ClInclude Include="SessionManager.h" />
     <ClInclude Include="SessionPool.h" />
     <ClInclude Include="SSLServer.h" />

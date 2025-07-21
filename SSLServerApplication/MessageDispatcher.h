@@ -12,7 +12,7 @@ class SessionManager; // 전방 선언
 class MessageDispatcher {
 public:
     using HandlerFunc = std::function<void(std::shared_ptr<SSLSession>, const nlohmann::json&)>;
-
+    
     MessageDispatcher(DataHandler* handler, SessionManager* sessionmanager); // DataHandler 포인터 주입
 
     void dispatch(std::shared_ptr<SSLSession> session, const nlohmann::json& msg);

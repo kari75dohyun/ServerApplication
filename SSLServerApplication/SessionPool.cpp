@@ -48,7 +48,9 @@ std::shared_ptr<SSLSession> SessionPool::acquire(boost::asio::ip::tcp::socket&& 
         auto& sess = pool_[idx];
         //if (sess.use_count() != 1) { // 참조 카운트가 1이 아니라면 이미 어딘가에서 사용중
 		if (sess->is_active()) { // 세션이 활성화 상태라면
-            g_logger->warn("[SessionPool][acquire] idx={} 세션이 이미 사용중! 강제 reset 시도", idx);
+            g_logger->critical("[SessionPool][acquire] idx={} 세션이 이미 사용중! 강제 reset 시도", idx);
+            // 운영 장애 알람 발송
+            send_admin_alert("[ALERT] SessionPool 중복 acquire 감지! idx=" + std::to_string(idx));
 #ifndef NDEBUG
             assert(false && "SessionPool::acquire: 중복 acquire 감지");
 #endif
@@ -91,7 +93,9 @@ void SessionPool::release(std::shared_ptr<SSLSession> session) {
             tmp.pop();
         }
         if (already_released) {
-            g_logger->warn("[SessionPool][release] 중복 release 감지! idx={}", idx);
+            g_logger->critical("[SessionPool][release] 중복 release 감지! idx={}", idx);
+            // 운영 장애 알람 발송
+            send_admin_alert("[ALERT] SessionPool 중복 acquire 감지! idx=" + std::to_string(idx));
 #ifndef NDEBUG
             assert(false && "SessionPool::release: 중복 release 발생!");
 #endif

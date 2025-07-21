@@ -1,4 +1,5 @@
-﻿#include "utility.h"
+﻿#include "SSLSession.h"
+#include "utility.h"
 #include <iostream>
 #include <curl/curl.h>
 #include "Logger.h"
@@ -23,4 +24,16 @@ void send_admin_alert(const std::string& message) {
     }
     curl_easy_cleanup(curl);
     curl_slist_free_all(headers);
+}
+
+bool check_user_udp_rate_limit(SSLSession& sess, size_t user_limit) {
+    auto now = std::chrono::steady_clock::now();
+    static std::mutex m;
+    std::lock_guard<std::mutex> lock(m);
+    if (now - sess.get_udp_packet_window() > std::chrono::seconds(1)) {
+        sess.set_udp_packet_window(now);
+        sess.set_udp_packet_count(0);
+    }
+    sess.inc_udp_packet_count();
+    return sess.get_udp_packet_count() <= user_limit;
 }

@@ -5,7 +5,8 @@
 #include "Logger.h"
 #include <memory>
 #include "Utility.h"
-//#include <fstream>
+#include "MessageHandlers/ChatHandler.h"
+
 
 MessageDispatcher::MessageDispatcher(DataHandler* handler, SessionManager* sessionmanager) : handler_(handler), session_manager_(sessionmanager){
     // "login" 핸들러 등록
@@ -70,24 +71,28 @@ MessageDispatcher::MessageDispatcher(DataHandler* handler, SessionManager* sessi
 		});
 
     // "chat" 핸들러 등록
-    register_handler("chat", [this](std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {
-        std::string chat_msg = msg.value("msg", "");
-        std::string nickname = session->get_nickname();
-
-        nlohmann::json send_msg;
-        send_msg["type"] = "chat";
-        send_msg["from"] = nickname;
-        send_msg["msg"] = chat_msg;
-
-        handler_->broadcast(send_msg.dump() + "\n", session->get_session_id(), session);
-
-        session->post_write(
-            nlohmann::json{
-                {"type", "notice"},
-                {"msg", chat_msg + " 'Message sent completed.' "}
-            }.dump() + "\n"
-        );
+    register_handler("chat",
+    [this](std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {
+        chat_handler(session, msg, handler_);
         });
+    //register_handler("chat", [this](std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {
+    //    std::string chat_msg = msg.value("msg", "");
+    //    std::string nickname = session->get_nickname();
+
+    //    nlohmann::json send_msg;
+    //    send_msg["type"] = "chat";
+    //    send_msg["from"] = nickname;
+    //    send_msg["msg"] = chat_msg;
+
+    //    handler_->broadcast(send_msg.dump() + "\n", session->get_session_id(), session);
+
+    //    session->post_write(
+    //        nlohmann::json{
+    //            {"type", "notice"},
+    //            {"msg", chat_msg + " 'Message sent completed.' "}
+    //        }.dump() + "\n"
+    //    );
+    //    });
 
     //register_handler("ping", [this](std::shared_ptr<SSLSession> session, const nlohmann::json& msg) {
     //    session->on_ping_received(); // 아래에서 구현!

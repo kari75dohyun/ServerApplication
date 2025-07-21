@@ -121,7 +121,20 @@ void SSLSession::do_write_queue() {
     }
     auto msg = write_queue_.front();
     uint64_t my_generation = generation_.load(std::memory_order_relaxed); // 세대 캡처
-    boost::asio::async_write(socket_, boost::asio::buffer(*msg),
+
+    // === 길이 프리픽스 만들기 ===
+    uint32_t len = static_cast<uint32_t>(msg->size());
+    uint32_t len_net = htonl(len); // 네트워크 바이트 오더(빅엔디안)
+    std::array<char, 4> len_buf;
+    memcpy(len_buf.data(), &len_net, 4);
+
+    // === 버퍼 합치기 ===
+    std::vector<boost::asio::const_buffer> buffers;
+    buffers.push_back(boost::asio::buffer(len_buf));
+    buffers.push_back(boost::asio::buffer(*msg));
+
+    //boost::asio::async_write(socket_, boost::asio::buffer(*msg),
+    boost::asio::async_write(socket_, buffers,      // 4바이트 프리픽스로 변경
         boost::asio::bind_executor(strand_,
             [this, self, my_generation](const boost::system::error_code& ec, std::size_t /*length*/) {
                 try {
@@ -296,7 +309,7 @@ void SSLSession::close_session() {
             boost::asio::bind_executor(strand_,
                 [this, self](const boost::system::error_code& ec) {
                     if (ec) {
-                        //std::cerr << "[close_session] async_shutdown error: " << ec.message() << std::endl;
+                        //std::cerr << "[close_session] async_shutdown` error: " << ec.message() << std::endl;
                         //LOG_ERROR("[close_session] async_shutdown error: ", ec.message());
                         g_logger->error("[close_session] async_shutdown error: {}", ec.message());
                     }

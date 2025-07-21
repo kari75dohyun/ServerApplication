@@ -13,6 +13,12 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="헤더 파일\MessageHandlers">
+      <UniqueIdentifier>{97e42ef4-e863-452f-a258-f406c5e89422}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="소스 파일\MessageHandlers">
+      <UniqueIdentifier>{be87c83c-5ba1-40e1-93b0-9e96f17b8bdf}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="SSLServerApplication.cpp">
@@ -54,15 +60,15 @@
     <ClCompile Include="SessionManager.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
+    <ClCompile Include="MessageHandlers\ChatHandler.cpp">
+      <Filter>소스 파일\MessageHandlers</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="SSLServer.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
     <ClInclude Include="SSLSession.h">
-      <Filter>헤더 파일</Filter>
-    </ClInclude>
-    <ClInclude Include="DataHandler.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
     <ClInclude Include="UDPManager.h">
@@ -91,6 +97,12 @@
     </ClInclude>
     <ClInclude Include="SessionManager.h">
       <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="DataHandler.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="MessageHandlers\ChatHandler.h">
+      <Filter>헤더 파일\MessageHandlers</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

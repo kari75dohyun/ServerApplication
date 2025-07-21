@@ -33,6 +33,8 @@ public:
 
     size_t get_total_session_count();
 
+    void cleanup_expired_nicknames();
+
 private:
     size_t shard_count_ = 0;
     std::vector<std::unordered_map<int, std::shared_ptr<SSLSession>>> session_buckets_;

@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "SSLSession.h"   
 #include <boost/asio.hpp>
 #include <string>
 #include <unordered_map>
@@ -12,6 +13,7 @@
 #include "Zone.h"
 #include "ZoneManager.h"
 #include <nlohmann/json.hpp>
+#include "Utility.h"
 
 using json = nlohmann::json;
 
@@ -59,6 +61,9 @@ private:
 	ZoneManager zone_manager_;            // Zoneanager 멤버 추가
 
     boost::asio::steady_timer monitor_timer_; // 모니터링 타이머
+
+private:
+    UdpRateLimiterShard udp_global_limiter_;
 
 public:
     DataHandler(boost::asio::io_context& io, std::shared_ptr<SessionManager> session_manager, int zone_count = MAX_ZONE_COUNT); // 생성자 선언 필요!

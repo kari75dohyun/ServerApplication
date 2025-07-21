@@ -106,6 +106,7 @@ void SessionManager::unregister_nickname(const std::string& nickname, std::share
             nickname_index_.erase(it);
         }
     }
+	cleanup_expired_nicknames();  // 만료된 닉네임 정리
 }
 
 std::shared_ptr<SSLSession> SessionManager::find_session_by_nickname(const std::string& nickname) {
@@ -124,4 +125,17 @@ size_t SessionManager::get_total_session_count() {
         total += session_buckets_[i].size();
     }
     return total;
+}
+
+void SessionManager::cleanup_expired_nicknames() {
+    std::lock_guard<std::mutex> lock(nickname_mutex_);
+    for (auto it = nickname_index_.begin(); it != nickname_index_.end(); ) {
+        if (it->second.expired()) {
+            g_logger->info("[NICKNAME SWEEP] expired nickname entry removed: {}", it->first);
+            it = nickname_index_.erase(it);
+        }
+        else {
+            ++it;
+        }
+    }
 }

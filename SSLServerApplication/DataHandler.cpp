@@ -150,7 +150,8 @@ void DataHandler::on_udp_receive(const std::string& msg, const udp::endpoint& fr
     g_logger->info("[DEBUG][UDP] DataHandler address: {}", (void*)this);
     g_logger->info("[DEBUG][UDP] SessionManager address: {}", (void*)session_manager_.get());
     // [1] 서버 전체 UDP 패킷 제한 (중복방지)
-    if (!check_total_udp_rate_limit(udp_total_packet_count_, udp_total_packet_window_, TOTAL_LIMIT_PER_SEC)) {
+    //if (!check_total_udp_rate_limit(udp_total_packet_count_, udp_total_packet_window_, TOTAL_LIMIT_PER_SEC)) {
+    if (!sharded_udp_rate_limit(udp_global_limiter_, TOTAL_LIMIT_PER_SEC)) {
         g_logger->warn("[UDP][FLOOD] 서버 전체 초과 ({}/1초)", udp_total_packet_count_.load());
         return;
     }
