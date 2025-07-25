@@ -12,8 +12,7 @@ void Zone::broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_s
     auto self = shared_from_this();
 
     boost::asio::dispatch(strand_, [this, self, msg, &udp_socket, sender_nickname]() {
-        // 1. 복사할 벡터 선언
-        std::vector<std::tuple<std::shared_ptr<SSLSession>, boost::asio::ip::udp::endpoint>> targets;
+        std::vector<boost::asio::ip::udp::endpoint> targets;
 
         {
             std::lock_guard<std::mutex> lock(session_mutex_);
@@ -23,35 +22,44 @@ void Zone::broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_s
                 if (sess->get_nickname() == sender_nickname) continue;
                 auto udp_ep = sess->get_udp_endpoint();
                 if (udp_ep) {
-                    targets.emplace_back(sess, *udp_ep); // weak_ptr->shared_ptr
+                    targets.push_back(*udp_ep);
                 }
             }
-            // 여기서 락 즉시 해제
         }
 
-        // 2. 이제 락 없이 send queue에 메시지 push/send
-        for (auto& [sess, ep] : targets) {
+        // [A] 송신 큐에 대상 모두 enqueue
+        for (auto& ep : targets) {
             auto data = std::make_shared<std::string>(msg);
-            udp_socket.async_send_to(boost::asio::buffer(*data), ep,
-                [data](const boost::system::error_code&, std::size_t) {/*...*/});
+            // 큐 사이즈 제한(오버시 drop)
+            while (udp_send_queue_.size() >= kMaxUdpQueueSize) {
+                g_logger->warn("[UDP][Zone] udp_send_queue_ overflow (size={}), dropping oldest", udp_send_queue_.size());
+                udp_send_queue_.pop();
+            }
+            udp_send_queue_.emplace(data, ep);
         }
+
+        // [B] 전송 시도 (병렬 제한/순차 송신)
+        try_send_next(udp_socket);
         });
 }
 
 void Zone::try_send_next(boost::asio::ip::udp::socket& udp_socket) {
     auto self = shared_from_this();
+
     boost::asio::dispatch(strand_, [this, self, &udp_socket]() {
+        // 병렬 송신 개수 제한
         while (current_parallel_send_ < max_parallel_send_ && !udp_send_queue_.empty()) {
             auto [data, ep] = udp_send_queue_.front();
             udp_send_queue_.pop();
             ++current_parallel_send_;
 
-            udp_socket.async_send_to(boost::asio::buffer(*data), ep,
+            udp_socket.async_send_to(
+                boost::asio::buffer(*data), ep,
                 [this, self, &udp_socket, data, ep](const boost::system::error_code& ec, std::size_t /*bytes*/) {
                     if (ec) {
                         g_logger->warn("[UDP][zone queue send error] {}:{} {}", ep.address().to_string(), ep.port(), ec.message());
                     }
-                    // strand 덕분에 lock 없이 안전
+                    // 송신 완료 시 병렬 카운트 감소, 다음 송신 시도
                     --current_parallel_send_;
                     try_send_next(udp_socket);
                 }
@@ -59,6 +67,36 @@ void Zone::try_send_next(boost::asio::ip::udp::socket& udp_socket) {
         }
         });
 }
+
+//void Zone::broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname) {
+//    auto self = shared_from_this();
+//
+//    boost::asio::dispatch(strand_, [this, self, msg, &udp_socket, sender_nickname]() {
+//        // 1. 복사할 벡터 선언
+//        std::vector<std::tuple<std::shared_ptr<SSLSession>, boost::asio::ip::udp::endpoint>> targets;
+//
+//        {
+//            std::lock_guard<std::mutex> lock(session_mutex_);
+//            for (auto it = sessions_.begin(); it != sessions_.end(); ++it) {
+//                std::shared_ptr<SSLSession> sess = it->second.lock();
+//                if (!sess) continue;
+//                if (sess->get_nickname() == sender_nickname) continue;
+//                auto udp_ep = sess->get_udp_endpoint();
+//                if (udp_ep) {
+//                    targets.emplace_back(sess, *udp_ep); // weak_ptr->shared_ptr
+//                }
+//            }
+//            // 여기서 락 즉시 해제
+//        }
+//
+//        // 2. 이제 락 없이 send queue에 메시지 push/send
+//        for (auto& [sess, ep] : targets) {
+//            auto data = std::make_shared<std::string>(msg);
+//            udp_socket.async_send_to(boost::asio::buffer(*data), ep,
+//                [data](const boost::system::error_code&, std::size_t) {/*...*/});
+//        }
+//        });
+//}
 
 bool Zone::add_session(const std::shared_ptr<SSLSession>& sess) {
     std::lock_guard<std::mutex> lock(session_mutex_);

@@ -1,8 +1,13 @@
 ﻿#include "MessageBufferManager.h"
 #include <cstring>
+#ifdef _WIN32
 #include <winsock2.h>
-#include <iostream>
+#else
+#include <arpa/inet.h>
 //#include <arpa/inet.h> // 리눅스용 (윈도는 winsock2.h에서 ntohl)
+#endif
+#include <iostream>
+
 
 void MessageBufferManager::append(const char* data, size_t len) {
     //std::cout << "[서버 누적] 수신 " << len << " bytes: ";

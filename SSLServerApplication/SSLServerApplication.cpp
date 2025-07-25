@@ -30,8 +30,8 @@ int main() {
 
         // 2. SSL context, 기타 준비
         ssl::context context(ssl::context::tlsv12);
-        context.use_certificate_chain_file("D://Study//Boost_MulitThread_Strand_Parallel_SSL//x64//Debug//server.pem");
-        context.use_private_key_file("D://Study//Boost_MulitThread_Strand_Parallel_SSL//x64//Debug//server.key", ssl::context::pem);
+        context.use_certificate_chain_file("server.pem");
+        context.use_private_key_file("server.key", ssl::context::pem);
 
         // 3. DataHandler 인스턴스 생성 (io를 전달)
         // DataHandler 객체 생성 및 공유 포인터로 관리
