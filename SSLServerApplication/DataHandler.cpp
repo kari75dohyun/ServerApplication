@@ -7,6 +7,7 @@
 #include "Utility.h"
 #include "ZoneManager.h"
 #include "SessionManager.h"
+#include "MemoryTracker.h"
 
 using namespace std;
 using namespace boost::asio;
@@ -369,6 +370,7 @@ void DataHandler::start_monitor_loop()
                     });
                 g_logger->info("[SERVER] 활성 세션 수: {}", active_count);
             }
+            MemoryTracker::log_memory_usage();   //메모리 사용량도 같이 남김
 
             start_monitor_loop(); // 반복
         }

@@ -93,3 +93,5 @@ inline bool sharded_udp_rate_limit(UdpRateLimiterShard& limiter, size_t limit_pe
     }
     return total <= limit_per_sec;
 }
+
+std::string get_env_secret(const std::string& env_name);

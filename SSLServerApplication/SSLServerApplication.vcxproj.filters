@@ -87,6 +87,9 @@
     <ClCompile Include="MessageHandlers\KeepaliveHandler.cpp">
       <Filter>소스 파일\MessageHandlers</Filter>
     </ClCompile>
+    <ClCompile Include="MemoryTracker.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="SSLServer.h">
@@ -145,6 +148,9 @@
     </ClInclude>
     <ClInclude Include="UDPMessageHandlers\UdpBroadcastZoneHandler.h">
       <Filter>헤더 파일\UDPMessageHandlers</Filter>
+    </ClInclude>
+    <ClInclude Include="MemoryTracker.h">
+      <Filter>헤더 파일</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

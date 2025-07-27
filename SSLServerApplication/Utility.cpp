@@ -3,6 +3,7 @@
 #include <iostream>
 #include <curl/curl.h>
 #include "Logger.h"
+#include <cstdlib>
 
 void send_admin_alert(const std::string& message) {
     static const char* slack_webhook_url = "https://hooks.slack.com/services/XXX/YYY/ZZZ"; // 본인 슬랙 URL로 교체
@@ -36,4 +37,20 @@ bool check_user_udp_rate_limit(SSLSession& sess, size_t user_limit) {
     }
     sess.inc_udp_packet_count();
     return sess.get_udp_packet_count() <= user_limit;
+}
+
+std::string get_env_secret(const std::string& env_name) {
+#ifdef _WIN32
+    char* val = nullptr;
+    size_t len = 0;
+    errno_t err = _dupenv_s(&val, &len, env_name.c_str());
+    if (err || val == nullptr) return "";
+    std::string result(val);
+    free(val);
+    return result;
+#else
+    const char* val = getenv(env_name.c_str());
+    if (!val) return "";
+    return std::string(val);
+#endif
 }

@@ -138,6 +138,7 @@
   <ItemGroup>
     <ClCompile Include="DataHandler.cpp" />
     <ClCompile Include="Logger.cpp" />
+    <ClCompile Include="MemoryTracker.cpp" />
     <ClCompile Include="MessageBufferManager.cpp" />
     <ClCompile Include="MessageDispatcher.cpp" />
     <ClCompile Include="MessageHandlers\CertifyHandler.cpp" />
@@ -160,6 +161,7 @@
   <ItemGroup>
     <ClInclude Include="DataHandler.h" />
     <ClInclude Include="Logger.h" />
+    <ClInclude Include="MemoryTracker.h" />
     <ClInclude Include="MessageBufferManager.h" />
     <ClInclude Include="MessageDispatcher.h" />
     <ClInclude Include="MessageHandlers\CertifyHandler.h" />
