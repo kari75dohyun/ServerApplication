@@ -1,0 +1,22 @@
+{
+  "tcp_port": 12345,
+  "udp_port": 54321,
+  "session_pool_size": 1,
+  "max_session_pool_size": 10000,
+  "max_udp_queue_size": 10000,
+  "zone_max_sessions": 500,
+  "udp_shard_count": 16,
+  "session_max_close_retries": 3,
+  "session_retry_delay_ms": 100,
+  "max_task_queue": 1000,
+  "login_timeout_seconds": 90,
+  "max_write_queue_size": 100,
+  "write_queue_warn_threshold": 80,
+  "write_queue_overflow_limit": 10,
+  "udp_expire_timeout_seconds": 300,
+  "user_limit_per_sec": 10,
+  "total_limit_per_sec": 1000,
+  "max_zone_count": 10,
+  "max_udp_queue_size": 10000,
+  "max_zone_session_count": 500
+}
