@@ -366,12 +366,11 @@ void Session::do_read()
                         // 2. 여러 메시지 추출 및 처리
                         while (auto opt_msg = get_msg_buffer().extract_message()) {
                             try {
-                                //cout << "[DEBUG] dispatching message" << endl;
                                 json msg = json::parse(*opt_msg);
+
                                 if (auto handler = data_handler_.lock()) {
                                     handler->dispatch(self, msg);  // 바로 이렇게!
                                 }
-                                //dispatcher_.dispatch(self, msg);
                             }
                             catch (const exception& e) {
                                 cerr << "[JSON parsing error] " << e.what() << " / data: " << *opt_msg << endl;
@@ -380,6 +379,12 @@ void Session::do_read()
                                 post_write(get_message());
                                 // 에러 시에도 계속 다음 메시지 분리/처리
                             }
+                        }
+                        // 비정상 길이 감지 로그 및 세션 종료 
+                        if (get_msg_buffer().was_last_clear_by_invalid_length()) {
+                            AppContext::instance().logger->warn("[TCP] 비정상/과도한 패킷 길이 감지! 세션 강제 종료 session_id={}", get_session_id());
+                            close_session();
+                            return;  // read loop 탈출
                         }
 
                         // 3. 계속해서 read (이 구조면 wrote 체크 필요 없음)

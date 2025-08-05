@@ -31,6 +31,6 @@ private:
     // 인덱스 중복 검사
     std::queue<size_t> reusable_indices_;               // 인덱스 큐
     std::unordered_set<size_t> available_index_set_;    // 중복 검사용
-    std::mutex index_mutex_;                            // 인덱스 큐 + set 동기화
+    //std::mutex index_mutex_;                            // 인덱스 큐 + set 동기화
 };
 

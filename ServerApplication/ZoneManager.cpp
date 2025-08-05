@@ -12,11 +12,11 @@ ZoneManager::ZoneManager(boost::asio::io_context& io, int zone_count)
     }
 }
 
-std::shared_ptr<Zone> ZoneManager::enter_zone(int zone_id) {
+std::shared_ptr<Zone> ZoneManager::get_zone(int zone_id) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = zones_.find(zone_id);
     if (it != zones_.end()) return it->second;
-	// zones_에 zone_id가 없으면 새로 생성
+    // zones_에 zone_id가 없으면 새로 생성
     //auto zone = std::make_shared<Zone>(io_, zone_id, max_sessions);
     //zones_[zone_id] = zone;
     //return zone;
@@ -26,14 +26,7 @@ std::shared_ptr<Zone> ZoneManager::enter_zone(int zone_id) {
     return nullptr;
 }
 
-std::shared_ptr<Zone> ZoneManager::get_zone(int zone_id) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = zones_.find(zone_id);
-    if (it != zones_.end()) return it->second;
-    return nullptr;
-}
-
-// 현재 사용하지 않음.
+// 현재 사용하지 않음. 사용하게 될때 헤더에 public 로 바꾼다.
 void ZoneManager::remove_zone(int zone_id) {
     std::lock_guard<std::mutex> lock(mutex_);
     zones_.erase(zone_id);

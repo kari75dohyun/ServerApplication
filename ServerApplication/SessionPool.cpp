@@ -26,7 +26,7 @@ std::shared_ptr<Session> SessionPool::acquire(boost::asio::ip::tcp::socket&& soc
     std::lock_guard<std::mutex> lock(mutex_);
 
     size_t idx;
-    std::lock_guard<std::mutex> idx_lock(index_mutex_);  // 추가됨
+    //std::lock_guard<std::mutex> idx_lock(index_mutex_);  // 추가됨
 
     if (reusable_indices_.empty()) {
         // 풀 확장
@@ -99,7 +99,7 @@ void SessionPool::release(std::shared_ptr<Session> session) {
 
     // 2. 중복 release 방지 (unordered_set으로 검사)
     {
-        std::lock_guard<std::mutex> idx_lock(index_mutex_);  // 인덱스 동기화
+        //std::lock_guard<std::mutex> idx_lock(index_mutex_);  // 인덱스 동기화
         if (available_index_set_.find(idx) != available_index_set_.end()) {
             AppContext::instance().logger->critical("[SessionPool][release] 중복 release 감지! idx={}", idx);
             send_admin_alert("[ALERT] SessionPool 중복 acquire 감지! idx=" + std::to_string(idx));

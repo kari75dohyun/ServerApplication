@@ -59,6 +59,13 @@ void MessageDispatcher::dispatch(std::shared_ptr<Session> session, const nlohman
     else {
         // Unknown type
         session->post_write(R"({"type":"error","msg":"Unknown message type."})" "\n");
+        // 없는 type  로그 남기고 세션 강제 종료
+        AppContext::instance().logger->warn(
+            "[DISPATCH][Unknown type][session_id={}] type='{}' original msg: {}",
+            session->get_session_id(), type, msg.dump()
+        );
+
+		session->close_session(); // 세션 종료
     }
 }
 

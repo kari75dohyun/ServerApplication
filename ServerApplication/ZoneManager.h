@@ -9,10 +9,8 @@ class ZoneManager {
 public:
     ZoneManager(boost::asio::io_context& io, int zone_count);
 
-    std::shared_ptr<Zone> enter_zone(int zone_id);
     std::shared_ptr<Zone> get_zone(int zone_id);
     void remove_session(const std::shared_ptr<Session>& sess);
-    void remove_zone(int zone_id);
 
     template<typename Func>
     void for_each_zone(Func&& fn) {
@@ -23,4 +21,6 @@ private:
     boost::asio::io_context& io_;
     std::unordered_map<int, std::shared_ptr<Zone>> zones_;
     std::mutex mutex_;
+
+    void remove_zone(int zone_id);
 };

@@ -18,61 +18,93 @@ void Zone::broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_s
 
         {
             std::lock_guard<std::mutex> lock(session_mutex_);
-            for (auto it = sessions_.begin(); it != sessions_.end(); ++it) {
-                std::shared_ptr<Session> sess = it->second.lock();
+            for (auto& [id, weak_sess] : sessions_) {
+                auto sess = weak_sess.lock();
                 if (!sess) continue;
                 if (sess->get_nickname() == sender_nickname) continue;
-                auto udp_ep = sess->get_udp_endpoint();
-                if (udp_ep) {
-                    targets.push_back(*udp_ep);
-                }
+                auto ep = sess->get_udp_endpoint();
+                if (ep) targets.push_back(*ep);
             }
         }
 
-        size_t target_count = targets.size();
-
-        // [A] 송신 큐에 대상 모두 enqueue
         for (auto& ep : targets) {
             auto data = std::make_shared<std::string>(msg);
-            // 큐 사이즈 제한(오버시 drop)
-            while (udp_send_queue_.size() >= static_cast<size_t>(AppContext::instance().config.value("max_udp_queue_size", 10000))) {
-                AppContext::instance().logger->warn("[UDP][Zone] udp_send_queue_ overflow (size={}), dropping oldest", udp_send_queue_.size());
-                udp_send_queue_.pop();
-            }
-            udp_send_queue_.emplace(data, ep);
-        }
-
-        AppContext::instance().logger->info("[UDP][Zone:{}] broadcast message sent from '{}' to {} clients", zone_id_, sender_nickname, target_count);
-
-        // [B] 전송 시도 (병렬 제한/순차 송신)
-        try_send_next(udp_socket);
-        });
-}
-
-void Zone::try_send_next(boost::asio::ip::udp::socket& udp_socket) {
-    auto self = shared_from_this();
-
-    boost::asio::dispatch(strand_, [this, self, &udp_socket]() {
-        // 병렬 송신 개수 제한
-        while (current_parallel_send_ < max_parallel_send_ && !udp_send_queue_.empty()) {
-            auto [data, ep] = udp_send_queue_.front();
-            udp_send_queue_.pop();
-            ++current_parallel_send_;
-
             udp_socket.async_send_to(
                 boost::asio::buffer(*data), ep,
-                [this, self, &udp_socket, data, ep](const boost::system::error_code& ec, std::size_t /*bytes*/) {
+                [ep, data](const boost::system::error_code& ec, std::size_t bytes) {
                     if (ec) {
-                        AppContext::instance().logger->warn("[UDP][zone queue send error] {}:{} {}", ep.address().to_string(), ep.port(), ec.message());
+                        AppContext::instance().logger->warn("[UDP][Zone] Send error to {}:{} - {}", ep.address().to_string(), ep.port(), ec.message());
                     }
-                    // 송신 완료 시 병렬 카운트 감소, 다음 송신 시도
-                    --current_parallel_send_;
-                    try_send_next(udp_socket);
-                }
-            );
+                });
         }
+
+        AppContext::instance().logger->info("[Zone:{}] Broadcasted to {} sessions", zone_id_, targets.size());
         });
 }
+
+//void Zone::broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname) {
+//    auto self = shared_from_this();
+//
+//    boost::asio::dispatch(strand_, [this, self, msg, &udp_socket, sender_nickname]() {
+//        std::vector<boost::asio::ip::udp::endpoint> targets;
+//
+//        {
+//            std::lock_guard<std::mutex> lock(session_mutex_);
+//            for (auto it = sessions_.begin(); it != sessions_.end(); ++it) {
+//                std::shared_ptr<Session> sess = it->second.lock();
+//                if (!sess) continue;
+//                if (sess->get_nickname() == sender_nickname) continue;
+//                auto udp_ep = sess->get_udp_endpoint();
+//                if (udp_ep) {
+//                    targets.push_back(*udp_ep);
+//                }
+//            }
+//        }
+//
+//        size_t target_count = targets.size();
+//
+//        // [A] 송신 큐에 대상 모두 enqueue
+//        for (auto& ep : targets) {
+//            auto data = std::make_shared<std::string>(msg);
+//            // 큐 사이즈 제한(오버시 drop)
+//            while (udp_send_queue_.size() >= static_cast<size_t>(AppContext::instance().config.value("max_udp_queue_size", 10000))) {
+//                AppContext::instance().logger->warn("[UDP][Zone] udp_send_queue_ overflow (size={}), dropping oldest", udp_send_queue_.size());
+//                udp_send_queue_.pop();
+//            }
+//            udp_send_queue_.emplace(data, ep);
+//        }
+//
+//        AppContext::instance().logger->info("[UDP][Zone:{}] broadcast message sent from '{}' to {} clients", zone_id_, sender_nickname, target_count);
+//
+//        // [B] 전송 시도 (병렬 제한/순차 송신)
+//        try_send_next(udp_socket);
+//        });
+//}
+
+//void Zone::try_send_next(boost::asio::ip::udp::socket& udp_socket) {
+//    auto self = shared_from_this();
+//
+//    boost::asio::dispatch(strand_, [this, self, &udp_socket]() {
+//        // 병렬 송신 개수 제한
+//        while (current_parallel_send_ < max_parallel_send_ && !udp_send_queue_.empty()) {
+//            auto [data, ep] = udp_send_queue_.front();
+//            udp_send_queue_.pop();
+//            ++current_parallel_send_;
+//
+//            udp_socket.async_send_to(
+//                boost::asio::buffer(*data), ep,
+//                [this, self, &udp_socket, data, ep](const boost::system::error_code& ec, std::size_t /*bytes*/) {
+//                    if (ec) {
+//                        AppContext::instance().logger->warn("[UDP][zone queue send error] {}:{} {}", ep.address().to_string(), ep.port(), ec.message());
+//                    }
+//                    // 송신 완료 시 병렬 카운트 감소, 다음 송신 시도
+//                    --current_parallel_send_;
+//                    try_send_next(udp_socket);
+//                }
+//            );
+//        }
+//        });
+//}
 
 //void Zone::broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname) {
 //    auto self = shared_from_this();

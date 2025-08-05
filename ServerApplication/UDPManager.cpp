@@ -25,7 +25,7 @@ void UDPManager::start_receive() {
     socket_.async_receive_from(
         boost::asio::buffer(buffer_), remote_endpoint_,
         [this](const boost::system::error_code& ec, std::size_t bytes_recvd) {
-            if (!ec && bytes_recvd > 0) {
+            if (!ec && (bytes_recvd > 0 || bytes_recvd <= 4096)) {
                 auto msg = std::make_shared<std::string>(buffer_.data(), bytes_recvd);
 
                 if (auto handler = data_handler_.lock()) {
@@ -86,6 +86,18 @@ void UDPManager::start_receive() {
                     }
                 }
             }
+            else if (bytes_recvd == 0 || bytes_recvd > 4096){
+                AppContext::instance().logger->warn("[UDP] Invalid packet size: {}", bytes_recvd);
+                start_receive();
+                return;
+            }
+            else {
+                AppContext::instance().logger->error("[UDP] Receive error: {}", ec.message());
+                // 필요시 소켓 재시작/복구
+                start_receive();
+                return;
+            }
+
             start_receive(); // 다음 수신 준비
         });
 }

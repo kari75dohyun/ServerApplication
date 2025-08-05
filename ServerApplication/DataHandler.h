@@ -63,10 +63,10 @@ private:
     std::chrono::steady_clock::time_point udp_total_packet_window_{};
 
     // UDP 송신 큐와 직렬화용 strand
-    std::queue<std::tuple<std::shared_ptr<std::string>, boost::asio::ip::udp::endpoint>> udp_send_queue_;
-    bool udp_send_in_progress_ = false;
+    //std::queue<std::tuple<std::shared_ptr<std::string>, boost::asio::ip::udp::endpoint>> udp_send_queue_;
+    //bool udp_send_in_progress_ = false;
     std::unique_ptr<boost::asio::strand<boost::asio::any_io_executor>> udp_send_strand_;
-    void try_send_next_udp(boost::asio::ip::udp::socket& udp_socket);
+    //void try_send_next_udp(boost::asio::ip::udp::socket& udp_socket);
 
 	boost::asio::io_context& io_context_; // ZoneManager 생성에 필요
 	ZoneManager zone_manager_;            // Zoneanager 멤버 추가

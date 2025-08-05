@@ -257,18 +257,9 @@ void DataHandler::on_udp_receive(const std::string& msg, const udp::endpoint& fr
 }
 
 void DataHandler::udp_broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname) {
+    // strand에서 모든 송신 예약(동시에 중첩 안됨, 순서 보장)
     boost::asio::post(*udp_send_strand_, [this, msg, &udp_socket, sender_nickname]() {
-        // 큐 사이즈가 넘치면 오래된 것부터 제거
-        while (udp_send_queue_.size() >= static_cast<size_t>(AppContext::instance().config.value("max_udp_queue_size", 10000))) {
-            AppContext::instance().logger->warn("[UDP][Global] udp_send_queue_ overflow (size={}), dropping oldest", udp_send_queue_.size());
-            udp_send_queue_.pop();
-        }
-        //if (udp_send_queue_.size() > kMaxUdpQueueSize) {
-            //// 정책1: 새 메시지 drop 및 경고
-            //g_logger->warn("[UDP][Global] udp_send_queue_ overflow (size={}) - dropping message", udp_send_queue_.size());
-            //return;
-        //}
-        for_each_session([&](const std::shared_ptr<Session> sess) {
+        for_each_session([&](const std::shared_ptr<Session>& sess) {
             if (!sess) return;
             if (sess->get_nickname().empty()) return;
             if (sess->get_nickname() == sender_nickname) return; // 자기 자신 제외
@@ -281,54 +272,95 @@ void DataHandler::udp_broadcast(const std::string& msg, boost::asio::ip::udp::so
                 send["nickname"] = recv.value("nickname", "");
                 send["msg"] = recv.value("msg", "");
                 auto data = std::make_shared<std::string>(send.dump());
-                udp_send_queue_.emplace(data, *udp_ep);
+
+                // strand 내라서 순차적으로 안전!
+                udp_socket.async_send_to(
+                    boost::asio::buffer(*data), *udp_ep,
+                    [data, udp_ep](const boost::system::error_code& ec, std::size_t) {
+                        if (ec) {
+                            AppContext::instance().logger->warn("[UDP][Global] async_send_to error: {}:{}", udp_ep->address().to_string(), udp_ep->port());
+                        }
+                    }
+                );
             }
             });
-
-        // 큐 송신 시도
-        try_send_next_udp(udp_socket);
         });
 }
 
-void DataHandler::try_send_next_udp(boost::asio::ip::udp::socket& udp_socket) {
-    if (udp_send_in_progress_ || udp_send_queue_.empty()) {
-        return;
-    }
-    udp_send_in_progress_ = true;
 
-    auto [data, ep] = udp_send_queue_.front();
-    udp_send_queue_.pop();
+//void DataHandler::udp_broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname) {
+//    boost::asio::post(*udp_send_strand_, [this, msg, &udp_socket, sender_nickname]() {
+//        // 큐 사이즈가 넘치면 오래된 것부터 제거
+//        while (udp_send_queue_.size() >= static_cast<size_t>(AppContext::instance().config.value("max_udp_queue_size", 10000))) {
+//            AppContext::instance().logger->warn("[UDP][Global] udp_send_queue_ overflow (size={}), dropping oldest", udp_send_queue_.size());
+//            udp_send_queue_.pop();
+//        }
+//        //if (udp_send_queue_.size() > kMaxUdpQueueSize) {
+//            //// 정책1: 새 메시지 drop 및 경고
+//            //g_logger->warn("[UDP][Global] udp_send_queue_ overflow (size={}) - dropping message", udp_send_queue_.size());
+//            //return;
+//        //}
+//        for_each_session([&](const std::shared_ptr<Session> sess) {
+//            if (!sess) return;
+//            if (sess->get_nickname().empty()) return;
+//            if (sess->get_nickname() == sender_nickname) return; // 자기 자신 제외
+//
+//            auto udp_ep = sess->get_udp_endpoint();
+//            if (udp_ep) {
+//                nlohmann::json recv = nlohmann::json::parse(msg);
+//                nlohmann::json send;
+//                send["type"] = recv.value("type", "");
+//                send["nickname"] = recv.value("nickname", "");
+//                send["msg"] = recv.value("msg", "");
+//                auto data = std::make_shared<std::string>(send.dump());
+//                udp_send_queue_.emplace(data, *udp_ep);
+//            }
+//            });
+//
+//        // 큐 송신 시도
+//        try_send_next_udp(udp_socket);
+//        });
+//}
 
-    // === 안전성 체크 ===
-    if (!data || data->empty()) {
-        AppContext::instance().logger->error("[try_send_next_udp] data is nullptr or empty!");
-        udp_send_in_progress_ = false;
-        return;
-    }
-    if (ep.address().is_unspecified() || ep.port() == 0) {
-        AppContext::instance().logger->error("[try_send_next_udp] endpoint is unspecified/zero! {}:{}", ep.address().to_string(), ep.port());
-        udp_send_in_progress_ = false;
-        return;
-    }
-    if (!udp_socket.is_open()) {
-        AppContext::instance().logger->error("[try_send_next_udp] udp_socket is closed!");
-        udp_send_in_progress_ = false;
-        return;
-    }
-
-    udp_socket.async_send_to(
-        boost::asio::buffer(*data), ep,
-        boost::asio::bind_executor(*udp_send_strand_,
-            [this, &udp_socket, data](const boost::system::error_code& ec, std::size_t /*bytes*/) {
-                if (ec) {
-                    AppContext::instance().logger->warn("[UDP][send queue][strand] {} {}", ec.message(), "async_send_to 에러");
-                }
-                udp_send_in_progress_ = false;
-                try_send_next_udp(udp_socket);
-            }
-        )
-    );
-}
+//void DataHandler::try_send_next_udp(boost::asio::ip::udp::socket& udp_socket) {
+//    if (udp_send_in_progress_ || udp_send_queue_.empty()) {
+//        return;
+//    }
+//    udp_send_in_progress_ = true;
+//
+//    auto [data, ep] = udp_send_queue_.front();
+//    udp_send_queue_.pop();
+//
+//    // === 안전성 체크 ===
+//    if (!data || data->empty()) {
+//        AppContext::instance().logger->error("[try_send_next_udp] data is nullptr or empty!");
+//        udp_send_in_progress_ = false;
+//        return;
+//    }
+//    if (ep.address().is_unspecified() || ep.port() == 0) {
+//        AppContext::instance().logger->error("[try_send_next_udp] endpoint is unspecified/zero! {}:{}", ep.address().to_string(), ep.port());
+//        udp_send_in_progress_ = false;
+//        return;
+//    }
+//    if (!udp_socket.is_open()) {
+//        AppContext::instance().logger->error("[try_send_next_udp] udp_socket is closed!");
+//        udp_send_in_progress_ = false;
+//        return;
+//    }
+//
+//    udp_socket.async_send_to(
+//        boost::asio::buffer(*data), ep,
+//        boost::asio::bind_executor(*udp_send_strand_,
+//            [this, &udp_socket, data](const boost::system::error_code& ec, std::size_t /*bytes*/) {
+//                if (ec) {
+//                    AppContext::instance().logger->warn("[UDP][send queue][strand] {} {}", ec.message(), "async_send_to 에러");
+//                }
+//                udp_send_in_progress_ = false;
+//                try_send_next_udp(udp_socket);
+//            }
+//        )
+//    );
+//}
 
 // 미인증 세션 정리 함수 
 void DataHandler::cleanup_unauth_sessions(size_t max_unauth) {
@@ -362,11 +394,19 @@ void DataHandler::udp_broadcast_zone(int zone_id, const std::string& msg, boost:
     if (zone) {
         zone->broadcast(msg, udp_socket, sender_nickname);
     }
+    else {
+        AppContext::instance().logger->warn("[UDP][Zone] Zone {} not found for broadcast", zone_id);
+	}
 }
 
 // 세션을 zone에 등록
 void DataHandler::assign_session_to_zone(std::shared_ptr<Session> session, int zone_id) {
-    auto zone = zone_manager_.enter_zone(zone_id);
+    auto zone = zone_manager_.get_zone(zone_id);
+    if (!zone) {
+        AppContext::instance().logger->warn("[ZONE] 세션 {} → ZONE {} 배정 실패 (존 없음)", session->get_session_id(), zone_id);
+        return; // 존이 없으면 바로 리턴
+	}
+
     if (zone->add_session(session)) {
         session->set_zone_id(zone_id);
 		session->set_zone(zone); // 세션에 존 정보 설정
@@ -379,7 +419,13 @@ void DataHandler::assign_session_to_zone(std::shared_ptr<Session> session, int z
 
 
 std::shared_ptr<Zone> DataHandler::get_zone(int zone_id) {
-    return zone_manager_.get_zone(zone_id);
+    auto zone = zone_manager_.get_zone(zone_id);
+    if (!zone) {
+        AppContext::instance().logger->warn("[ZoneManager] 존재하지 않는 zone_id 요청: {}", zone_id);
+        return nullptr;
+    }
+
+    return zone;
 }
 // 활성 세션 모니터링 루프 시작
 void DataHandler::start_monitor_loop()
