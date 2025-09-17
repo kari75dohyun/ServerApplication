@@ -53,6 +53,13 @@
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
+  <PropertyGroup Label="Vcpkg">
+    <VcpkgGitBinary>C:\Program Files\Git\bin\git.exe</VcpkgGitBinary>
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+    <VcpkgRoot>$(SolutionDir)vcpkg\</VcpkgRoot>
+    <VcpkgInstalledDir>$(SolutionDir)vcpkg\installed\</VcpkgInstalledDir>
+    <VcpkgTriplet>x64-windows</VcpkgTriplet>
+  </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
@@ -106,14 +113,21 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>C:\Users\fireg\Downloads\vcpkg-2025.04.09\installed\x64-windows\include\curl</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)vcpkg\installed\x64-windows\include;$(ProjectDir)generated;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalUsingDirectories>
+      </AdditionalUsingDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>C:\Users\fireg\Downloads\vcpkg-2025.04.09\installed\x64-windows\lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>libcurl.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)vcpkg\installed\x64-windows\debug\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>ws2_32.lib;crypt32.lib;libcurl-d.lib;fmtd.lib;Normaliz.lib;Wldap32.lib;libprotobufd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <ShowProgress>LinkVerbose</ShowProgress>
+      <AdditionalOptions>/FORCE:MULTIPLE %(AdditionalOptions)</AdditionalOptions>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /d /y /i "$(SolutionDir)vcpkg\installed\x64-windows\debug\bin\*.dll" "$(TargetDir)"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -124,19 +138,30 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>C:\Users\fireg\Downloads\vcpkg-2025.04.09\installed\x64-windows\include\curl</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)vcpkg\installed\x64-windows\include;$(ProjectDir)generated</AdditionalIncludeDirectories>
+      <AdditionalUsingDirectories>
+      </AdditionalUsingDirectories>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>C:\Users\fireg\Downloads\vcpkg-2025.04.09\installed\x64-windows\lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>libcurl.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)vcpkg\installed\x64-windows\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>ws2_32.lib;crypt32.lib;libcurl.lib;fmt.lib;libprotobuf.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /d /y /i "$(SolutionDir)vcpkg\installed\x64-windows\bin\*.dll" "$(TargetDir)"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="DataHandler.cpp" />
+    <ClCompile Include="DBMiddlewareClient.cpp" />
+    <ClCompile Include="DBmwRouter.cpp" />
+    <ClCompile Include="generated\wire.pb.cc" />
+    <ClCompile Include="Handlers\DBmw\KeepaliveAckHandler.cpp" />
+    <ClCompile Include="Handlers\DBmw\LoginAckHandler.cpp" />
     <ClCompile Include="Logger.cpp" />
     <ClCompile Include="MemoryTracker.cpp" />
     <ClCompile Include="MessageBufferManager.cpp" />
@@ -154,6 +179,7 @@
     <ClCompile Include="UDPMessageHandlers\UdpBroadcastZoneHandler.cpp" />
     <ClCompile Include="UDPMessageHandlers\UdpHandler.cpp" />
     <ClCompile Include="UDPMessageHandlers\UdpRegisterHandler.cpp" />
+    <ClCompile Include="UseCases\LoginFlow.cpp" />
     <ClCompile Include="Utility.cpp" />
     <ClCompile Include="Zone.cpp" />
     <ClCompile Include="ZoneManager.cpp" />
@@ -161,6 +187,11 @@
   <ItemGroup>
     <ClInclude Include="AppContext.h" />
     <ClInclude Include="DataHandler.h" />
+    <ClInclude Include="DBMiddleWareClient.h" />
+    <ClInclude Include="DBmwHandlerRegistry.h" />
+    <ClInclude Include="DBmwHandlerRegistry.hpp" />
+    <ClInclude Include="DBmwRouter.h" />
+    <ClInclude Include="generated\wire.pb.h" />
     <ClInclude Include="Logger.h" />
     <ClInclude Include="MemoryTracker.h" />
     <ClInclude Include="MessageBufferManager.h" />
@@ -177,9 +208,43 @@
     <ClInclude Include="UDPMessageHandlers\UdpBroadcastZoneHandler.h" />
     <ClInclude Include="UDPMessageHandlers\UdpHandler.h" />
     <ClInclude Include="UDPMessageHandlers\UdpRegisterHandler.h" />
+    <ClInclude Include="UseCases\LoginFlow.h" />
     <ClInclude Include="Utility.h" />
     <ClInclude Include="Zone.h" />
     <ClInclude Include="ZoneManager.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="proto\wire.proto">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">if not exist "$(ProjectDir)generated" mkdir "$(ProjectDir)generated" &amp; "$(SolutionDir)vcpkg\installed\x64-windows\tools\protobuf\protoc.exe" -I"$(ProjectDir)proto" --cpp_out="$(ProjectDir)generated" "$(InputPath)"
+
+</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+      </AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)generated\$(InputName).pb.h;$(ProjectDir)generated\$(InputName).pb.cc</Outputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Generate C++ from %(Filename).proto</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">if not exist "$(ProjectDir)generated" mkdir "$(ProjectDir)generated" &amp; "$(SolutionDir)vcpkg\installed\x64-windows\tools\protobuf\protoc.exe" -I"$(ProjectDir)proto" --cpp_out="$(ProjectDir)generated" "$(InputPath)"
+
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Generate C++ from %(Filename).proto</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">if not exist "$(ProjectDir)generated" mkdir "$(ProjectDir)generated" &amp; "$(SolutionDir)vcpkg\installed\x64-windows\tools\protobuf\protoc.exe" -I"$(ProjectDir)proto" --cpp_out="$(ProjectDir)generated" "$(InputPath)"
+
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Generate C++ from %(Filename).proto</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">if not exist "$(ProjectDir)generated" mkdir "$(ProjectDir)generated" &amp; "$(SolutionDir)vcpkg\installed\x64-windows\tools\protobuf\protoc.exe" -I"$(ProjectDir)proto" --cpp_out="$(ProjectDir)generated" "$(InputPath)"
+
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Generate C++ from %(Filename).proto</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ProjectDir)generated\$(InputName).pb.h;$(ProjectDir)generated\$(InputName).pb.cc</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ProjectDir)generated\$(InputName).pb.h;$(ProjectDir)generated\$(InputName).pb.cc</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)generated\$(InputName).pb.h;$(ProjectDir)generated\$(InputName).pb.cc</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+      </AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+      </AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+      </AdditionalInputs>
+    </CustomBuild>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

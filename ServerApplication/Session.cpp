@@ -311,30 +311,73 @@ void Session::close_session() {
     }
 }
 
-
 void Session::cleanup() {
     auto self = shared_from_this();
-    // 1. 존에서 제거 (존에 등록돼 있을 경우만)
+
+    // 1) 존에서 제거 (존에 등록돼 있을 경우만)
     if (zone_id_ != -1) {
-        auto zone = get_zone();
-        if (zone) {
-            zone->remove_session(self);
-            set_zone_id(-1);  // 존 제거 후 무조건 초기화
+        int old_zone_id = zone_id_;  // 로그 정확도를 위해 제거 전 값 보존
+        auto zone_ptr = get_zone();
+        if (zone_ptr) {
+            zone_ptr->remove_session(self);
+            set_zone_id(-1);   // 세션의 zone_id 초기화
+            clear_zone();      // 세션의 zone 정보 초기화
+            AppContext::instance().logger->info(
+                "[Session] 존에서 세션 제거 완료: zone_id={}, session_id={}",
+                old_zone_id, session_id_);
+        }
+        else {
+            AppContext::instance().logger->warn(
+                "[Session] 존 포인터 없음. 제거 스킵: zone_id={}, session_id={}",
+                old_zone_id, session_id_);
+            // 그래도 내부 상태는 초기화
+            set_zone_id(-1);
             clear_zone();
-            AppContext::instance().logger->info("[Session] 존에서 세션 제거 완료: zone_id={}, session_id={}", zone_id_, session_id_);
         }
     }
 
-    // 2. Pool 반환 (세션 풀 사용 시)
-    if (released_.exchange(true)) return;
+    // 2) Pool 반환 (세션 풀 사용 시)
+    if (released_.exchange(true)) {
+        // 이미 반환 처리된 경우
+        AppContext::instance().logger->info(
+            "[Session] 이미 풀 반환된 세션입니다. session_id={}", session_id_);
+        return;
+    }
 
     if (release_callback_) {
-        release_callback_(shared_from_this());
+        // 풀로 반환
+        release_callback_(self);
     }
     else {
-        AppContext::instance().logger->warn("[Session] release_callback_ 이 설정되지 않음! 세션이 풀로 반환되지 않을 수 있음.");
+        AppContext::instance().logger->warn(
+            "[Session] release_callback_ 이 설정되지 않음! 세션이 풀로 반환되지 않을 수 있음. session_id={}",
+            session_id_);
     }
 }
+
+//void Session::cleanup() {
+//    auto self = shared_from_this();
+//    // 1. 존에서 제거 (존에 등록돼 있을 경우만)
+//    if (zone_id_ != -1) {
+//        auto zone = get_zone();
+//        if (zone) {
+//            zone->remove_session(self);
+//            set_zone_id(-1);  // 존 제거 후 무조건 초기화
+//            clear_zone();
+//            AppContext::instance().logger->info("[Session] 존에서 세션 제거 완료: zone_id={}, session_id={}", zone_id_, session_id_);
+//        }
+//    }
+//
+//    // 2. Pool 반환 (세션 풀 사용 시)
+//    if (released_.exchange(true)) return;
+//
+//    if (release_callback_) {
+//        release_callback_(shared_from_this());
+//    }
+//    else {
+//        AppContext::instance().logger->warn("[Session] release_callback_ 이 설정되지 않음! 세션이 풀로 반환되지 않을 수 있음.");
+//    }
+//}
 
 void Session::do_read() 
 {
@@ -353,7 +396,7 @@ void Session::do_read()
     post_task([this, self]() {
         auto& strand = get_strand();
         get_socket().async_read_some(
-            buffer(get_data(), sizeof(get_data())),
+            buffer(get_data(), sizeof(data_)),
             boost::asio::bind_executor(strand, [this, self](const boost::system::error_code& ec, size_t length) {
                 // [2] 콜백 진입 시 반드시 해제!
                 release_read();

@@ -10,6 +10,9 @@
 #include "Utility.h"
 #include <fstream>
 #include "AppContext.h"
+#include "DBMiddlewareClient.h"
+#include "DBmwRouter.h"
+#include "DBmwHandlerRegistry.h"
 
 using namespace std;
 using boost::asio::ip::tcp;
@@ -30,44 +33,91 @@ int main() {
     try {
         string secret = get_env_secret("MY_SERVER_SECRET");
         if (secret.empty()) {
-            // 환경변수가 없으면 에러 처리!
             std::cerr << "비밀 환경변수가 설정되어 있지 않습니다!\n";
             AppContext::instance().logger->error("MY_SERVER_SECRET Error");
             return 0;
-            // 프로그램 종료 또는 경고
         }
 
         // 1. io_context 준비
         boost::asio::io_context io;
 
-        // 3. DataHandler 인스턴스 생성 (io를 전달)
-        // DataHandler 객체 생성 및 공유 포인터로 관리
-        auto session_manager = std::make_shared<SessionManager>(max(4u, thread::hardware_concurrency() * 2));
+        // 2. 세션/핸들러 준비
+        auto session_manager = std::make_shared<SessionManager>(
+            max(4u, thread::hardware_concurrency() * 2));
 
-        auto data_handler = std::make_shared<DataHandler>(io, session_manager, AppContext::instance().config.value("max_zone_count", 10), max(4u, thread::hardware_concurrency() * 2));
-        //auto data_handler = std::make_shared<DataHandler>(io);
+        auto data_handler = std::make_shared<DataHandler>(
+            io,
+            session_manager,
+            AppContext::instance().config.value("max_zone_count", 10),
+            max(4u, thread::hardware_concurrency() * 2)
+        );
 
-        // 4. 세션풀, 서버 등 생성
-        auto session_pool = std::make_shared<SessionPool>(AppContext::instance().config.value("session_pool_size", 1024), AppContext::instance().config.value("max_session_pool_size", 10000), io, data_handler);
+        auto session_pool = std::make_shared<SessionPool>(
+            AppContext::instance().config.value("session_pool_size", 1024),
+            AppContext::instance().config.value("max_session_pool_size", 10000),
+            io,
+            data_handler
+        );
         data_handler->set_session_pool(session_pool);
 
-        Server server(io, static_cast<short>(AppContext::instance().config.value("tcp_port", 12345)), data_handler, session_pool);
+        Server server(
+            io,
+            static_cast<short>(AppContext::instance().config.value("tcp_port", 12345)),
+            data_handler,
+            session_pool
+        );
 
-        // 5. === 여기에서 글로벌 keepalive 타이머 루프 시작 ===
-        //data_handler->start_keepalive_loop();  // 클라가 하트비트 보내는 구조로 변경됨 DataHandler 생성자에서 호출해버림
-
-        // 6. UDP 등 기타 서버 준비
-        UDPManager udp_manager(io, static_cast<unsigned short>(AppContext::instance().config.value("udp_port", 54321)), data_handler); // UDP 매니저 생성
+        // 3. UDP 매니저
+        UDPManager udp_manager(
+            io,
+            static_cast<unsigned short>(AppContext::instance().config.value("udp_port", 54321)),
+            data_handler
+        );
 
         cout << "Echo Server started on port 12345" << endl;
-        //LOG_INFO("Echo Server started on port 12345");
         AppContext::instance().logger->info("Echo Server started on port 12345");
 
-        // 7. 스레드 풀 및 io.run()
+        // 4. DBMiddlewareClient 초기화/연결
+        auto router = std::make_shared<DBmwRouter>(io, session_manager, data_handler);
+        DBmwHandlerRegistry::instance().attach(*router);
+
+        auto db_client = std::make_shared<DBMiddlewareClient>(
+            io,
+            AppContext::instance().config.value("dbmw_host", std::string("127.0.0.1")),
+            static_cast<uint16_t>(AppContext::instance().config.value("dbmw_port", 40001)),
+            [router](const nlohmann::json& j) { router->handle(j); },
+            AppContext::instance().config.value("dbmw_login_nickname", std::string("Server_1")),
+            secret //이미 읽어둔 값 재사용
+        );
+
+        // 🔹 여기서 주입
+        AppContext::instance().session_manager = session_manager;
+        AppContext::instance().data_handler = data_handler;
+        AppContext::instance().db_router = router;
+        AppContext::instance().db_client = db_client;
+
+        std::weak_ptr<DBMiddlewareClient> weak_db = db_client;
+        router->set_senders(
+            [weak_db](const nlohmann::json& j) { if (auto db = weak_db.lock()) db->send_json(j); },
+            [weak_db](const nlohmann::json& j) { if (auto db = weak_db.lock()) db->send_secure_json(j); }
+        );
+
+        db_client->set_heartbeat_interval(AppContext::instance().config.value("dbmw_heartbeat_sec", 20));
+        db_client->start();
+
+        // 5. 시그널 핸들링 (Ctrl+C 안전 종료)
+        boost::asio::signal_set signals(io, SIGINT, SIGTERM);
+        signals.async_wait([&](const boost::system::error_code&, int) {
+            AppContext::instance().logger->info("Signal received. Shutting down...");
+            if (AppContext::instance().db_client)
+                AppContext::instance().db_client->stop();
+            io.stop();
+            });
+
+        // 6. 스레드 풀 및 io.run()
         size_t thread_count = std::thread::hardware_concurrency();
         if (thread_count == 0) thread_count = 4;
         cout << "Thread count: " << thread_count << endl;
-        //LOG_INFO("Thread count: ", thread_count);
         AppContext::instance().logger->info("Thread count: {}", thread_count);
 
         vector<thread> threads;
@@ -77,21 +127,17 @@ int main() {
                     io.run();
                 }
                 catch (const std::exception& e) {
-                    //std::cerr << "[FATAL] io_context.run()에서 예외 발생: " << e.what() << std::endl;
-                    //LOG_ERROR("[FATAL] io_context.run()에서 예외 발생: ", e.what());
-                    AppContext::instance().logger->error("[FATAL] io_context.run()에서 예외 발생: {}", e.what());
-                    // 로그 남기고, 필요하다면 복구 시도
+                    AppContext::instance().logger->error(
+                        "[FATAL] io_context.run() 예외: {}", e.what());
                 }
                 });
         }
 
         for (auto& t : threads)
             t.join();
-
     }
     catch (const std::exception& e) {
         cerr << "Exception: " << e.what() << endl;
-        //LOG_ERROR("Exception: ", e.what());
         AppContext::instance().logger->error("Exception: {}", e.what());
     }
 

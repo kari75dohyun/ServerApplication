@@ -1,0 +1,25 @@
+syntax = "proto3";
+package wire;
+
+enum MsgType {
+  UNKNOWN = 0;
+  SERVER_LOGIN_ACK = 1;
+  KEEPALIVE_ACK = 2;
+  DB_QUERY_RESULT = 3;
+  ERROR = 4;
+}
+
+message ServerLoginAck { string result = 1; string nickname = 2; }
+message KeepaliveAck {}
+message DbQueryResult { string req_id = 1; int32 code = 2; string api = 3; string data_json = 4; }
+message Error { string req_id = 1; int32 code = 2; string msg = 3; }
+
+message Envelope {
+  MsgType type = 1;
+  oneof payload {
+    ServerLoginAck server_login_ack = 10;
+    KeepaliveAck keepalive_ack      = 11;
+    DbQueryResult db_query_result   = 12;
+    Error error                     = 13;
+  }
+}

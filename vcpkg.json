@@ -1,0 +1,21 @@
+{
+  "name": "serverapplication",
+  "version-string": "0.1.0",
+  "builtin-baseline": "cb1fb4d21dcb517ceaaee6f4b1f4733dfbd72119",
+  "dependencies": [
+    "boost-asio",
+    "boost-system",
+    "fmt",
+    {
+      "name": "curl",
+      "default-features": false,
+      "features": [
+        "openssl"
+      ]
+    },
+    "openssl",
+    "protobuf",
+	"spdlog",
+    "nlohmann-json"
+  ]
+}

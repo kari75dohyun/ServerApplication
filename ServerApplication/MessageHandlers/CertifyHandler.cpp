@@ -6,12 +6,19 @@
 #include "../SessionManager.h"
 #include <iostream>
 #include "../AppContext.h"
+#include "../DBmwRouter.h"
+#include "../UseCases/LoginFlow.h"
 
 
 void login_handler(std::shared_ptr<Session> session, const nlohmann::json& msg,
     DataHandler* handler, SessionManager* session_manager)
 {
     std::string nickname = msg.value("nickname", "anonymity");
+
+    if (nickname.empty()) {
+        session->post_write(R"({"type":"error","msg":"nickname required"})");
+        return;
+    }
 
     if (nickname == "quit") {
         session->post_write(R"({"type":"logout","msg":"You are not logged in."})" "\n");
@@ -25,29 +32,10 @@ void login_handler(std::shared_ptr<Session> session, const nlohmann::json& msg,
     auto prev = session_manager->find_session_by_nickname(nickname);
     if (prev && prev != session) {
         prev->post_write(R"({"type":"error","msg":"Duplicate login ban"})" "\n");
-        prev->close_session();
+        prev->close_session();   // 기존 사용자를 삭제 한다.
     }
-    //handler_->register_nickname(nickname, session);
-    AppContext::instance().logger->info("[on_login] {} 세션 등록 시도", nickname);
-    session_manager->register_nickname(nickname, session);
-    AppContext::instance().logger->info("[on_login] 세션 등록 완료 후 login_success 전송: {}", nickname);
 
-    session->set_nickname(nickname);
-    session->on_nickname_registered(); // 닉네임 등록시 타이머 중지
-
-    // zone 배정
-    int default_zone = 1; // 정책에 따라 1번 존에 자동 배정
-    handler->assign_session_to_zone(session, default_zone);
-
-    nlohmann::json notice;
-    notice["type"] = "notice";
-    notice["msg"] = nickname + " has entered.";
-    handler->broadcast(notice.dump() + "\n", session->get_session_id(), session);
-
-    nlohmann::json login_msg;
-    login_msg["type"] = "login_success";
-    login_msg["nickname"] = nickname;
-    session->post_write(login_msg.dump() + "\n");
+    LoginFlow::begin(session, nickname);
 }
 
 void logout_handler(std::shared_ptr<Session> session, const nlohmann::json& msg, DataHandler* handler)

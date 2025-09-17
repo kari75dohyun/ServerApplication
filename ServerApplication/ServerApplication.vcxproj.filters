@@ -25,6 +25,27 @@
     <Filter Include="소스 파일\UDPMessageHandlers">
       <UniqueIdentifier>{bc50302b-97b3-43e1-b82a-8c01b9a3c553}</UniqueIdentifier>
     </Filter>
+    <Filter Include="헤더 파일\UseCases">
+      <UniqueIdentifier>{69fcf76e-878a-47a7-a1cd-860b6945f061}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="소스 파일\Handlers">
+      <UniqueIdentifier>{13040a58-9a3d-4e41-8fbb-27f4f87ab9ef}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="소스 파일\Handlers\DBmw">
+      <UniqueIdentifier>{a8e45a48-4e4e-4f20-b179-eb396bac55bf}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="소스 파일\Usecases">
+      <UniqueIdentifier>{95275c87-d183-49b3-8c65-385d1bd02084}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="소스 파일\generated">
+      <UniqueIdentifier>{96be1f8b-bd45-4c5d-8387-754252092cc3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="헤더 파일\generated">
+      <UniqueIdentifier>{49e5168b-576c-4ad6-aa85-daf33c619f11}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="소스 파일\proto">
+      <UniqueIdentifier>{dba0a01c-ef64-4d1b-9de7-74b7c02ce029}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ServerApplication.cpp">
@@ -89,6 +110,24 @@
     </ClCompile>
     <ClCompile Include="MemoryTracker.cpp">
       <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="DBMiddlewareClient.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="DBmwRouter.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="Handlers\DBmw\LoginAckHandler.cpp">
+      <Filter>소스 파일\Handlers\DBmw</Filter>
+    </ClCompile>
+    <ClCompile Include="UseCases\LoginFlow.cpp">
+      <Filter>소스 파일\Usecases</Filter>
+    </ClCompile>
+    <ClCompile Include="Handlers\DBmw\KeepaliveAckHandler.cpp">
+      <Filter>소스 파일\Handlers\DBmw</Filter>
+    </ClCompile>
+    <ClCompile Include="generated\wire.pb.cc">
+      <Filter>소스 파일\generated</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -155,5 +194,28 @@
     <ClInclude Include="AppContext.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="DBMiddleWareClient.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="DBmwRouter.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="UseCases\LoginFlow.h">
+      <Filter>헤더 파일\UseCases</Filter>
+    </ClInclude>
+    <ClInclude Include="DBmwHandlerRegistry.hpp">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="DBmwHandlerRegistry.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="generated\wire.pb.h">
+      <Filter>헤더 파일\generated</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="proto\wire.proto">
+      <Filter>소스 파일\proto</Filter>
+    </CustomBuild>
   </ItemGroup>
 </Project>

@@ -144,20 +144,47 @@ void SessionManager::cleanup_expired_nicknames() {
 
 void SessionManager::cleanup_inactive_sessions(std::chrono::seconds max_idle_time) {
     auto now = std::chrono::steady_clock::now();
+
+    // (1) shard 락 안에서는 종료 대상만 수집
+    std::vector<std::shared_ptr<Session>> to_close;
+    to_close.reserve(64);
+
     for (size_t shard = 0; shard < shard_count_; ++shard) {
         std::lock_guard<std::mutex> lock(session_mutexes_[shard]);
-        for (auto it = session_buckets_[shard].begin(); it != session_buckets_[shard].end(); ) {
-            auto& session = it->second;
-            if (session) {
-                auto last_alive = session->get_last_alive_time();
-                if (now - last_alive > max_idle_time) {
-                    AppContext::instance().logger->info("[SessionManager] 세션 {} 비활성 시간 초과, 종료 처리", session->get_session_id());
-                    session->close_session();
-                    it = session_buckets_[shard].erase(it);
-                    continue;
-                }
+        for (auto& [id, sess] : session_buckets_[shard]) {
+            if (!sess) continue;
+            auto last_alive = sess->get_last_alive_time();
+            if (now - last_alive > max_idle_time) {
+                to_close.push_back(sess);
             }
-            ++it;
         }
     }
+
+    // (2) 락을 모두 푼 뒤 실제 종료(내부에서 remove_session 재진입해도 안전)
+    for (auto& sess : to_close) {
+        if (!sess) continue;
+        AppContext::instance().logger->info(
+            "[SessionManager] 세션 {} 비활성 시간 초과, 종료 처리", sess->get_session_id());
+        sess->close_session();
+    }
 }
+
+//void SessionManager::cleanup_inactive_sessions(std::chrono::seconds max_idle_time) {
+//    auto now = std::chrono::steady_clock::now();
+//    for (size_t shard = 0; shard < shard_count_; ++shard) {
+//        std::lock_guard<std::mutex> lock(session_mutexes_[shard]);
+//        for (auto it = session_buckets_[shard].begin(); it != session_buckets_[shard].end(); ) {
+//            auto& session = it->second;
+//            if (session) {
+//                auto last_alive = session->get_last_alive_time();
+//                if (now - last_alive > max_idle_time) {
+//                    AppContext::instance().logger->info("[SessionManager] 세션 {} 비활성 시간 초과, 종료 처리", session->get_session_id());
+//                    session->close_session();
+//                    it = session_buckets_[shard].erase(it);
+//                    continue;
+//                }
+//            }
+//            ++it;
+//        }
+//    }
+//}

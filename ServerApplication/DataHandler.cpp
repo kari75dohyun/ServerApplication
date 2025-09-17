@@ -47,6 +47,11 @@ void DataHandler::add_session(int session_id, std::shared_ptr<Session> session) 
 void DataHandler::remove_session(int session_id) {
     // 1. SessionManager에서 제거하면서 세션 반환받기
     auto session = session_manager_->remove_session(session_id);
+
+    if (!session) {
+        AppContext::instance().logger->warn("[DataHandler] remove_session: session {} not found (already removed)", session_id);
+        return;
+    }
     // 2. ZoneManager에 세션 제거 요청
     if (session->get_zone_id() > -1) {
         zone_manager_.remove_session(session);
