@@ -90,7 +90,7 @@ int main() {
             secret //이미 읽어둔 값 재사용
         );
 
-        // 🔹 여기서 주입
+        // 여기서 주입
         AppContext::instance().session_manager = session_manager;
         AppContext::instance().data_handler = data_handler;
         AppContext::instance().db_router = router;
