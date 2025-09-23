@@ -9,10 +9,13 @@
 #include <string>
 #include <array>
 #include "MessageBufferManager.h"
+#include "generated/wire.pb.h"
 
 class DBMiddlewareClient : public std::enable_shared_from_this<DBMiddlewareClient> {
 public:
     using OnMessageFn = std::function<void(const nlohmann::json&)>;
+    // Protobuf 콜백
+    using OnProtoFn = std::function<void(const wire::Envelope&)>;
 
     DBMiddlewareClient(boost::asio::io_context& io,
         std::string host,
@@ -24,6 +27,12 @@ public:
     void start();
     void stop();
     bool is_connected() const { return connected_.load(); }
+
+    // 프로토콜 콜백 세터
+    void set_on_message_pb(OnProtoFn fn) { on_message_pb_ = std::move(fn); }
+    // Protobuf 전송 
+    void send_proto(const google::protobuf::MessageLite& msg);
+    void send_secure_proto(const google::protobuf::MessageLite& msg);
 
     // JSON만 body로 보내고 싶을 때 (자동 4바이트 프리픽스)
     void send_json(const nlohmann::json& j);
@@ -88,4 +97,5 @@ private:
     int heartbeat_sec_ = 20;
 
     OnMessageFn on_message_;
+    OnProtoFn on_message_pb_;
 };

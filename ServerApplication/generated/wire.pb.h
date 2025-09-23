@@ -81,7 +81,7 @@ enum MsgType : int {
   SERVER_LOGIN_ACK = 1,
   KEEPALIVE_ACK = 2,
   DB_QUERY_RESULT = 3,
-  ERROR = 4,
+  ERROR_MSG = 4,
   MsgType_INT_MIN_SENTINEL_DO_NOT_USE_ =
       std::numeric_limits<::int32_t>::min(),
   MsgType_INT_MAX_SENTINEL_DO_NOT_USE_ =

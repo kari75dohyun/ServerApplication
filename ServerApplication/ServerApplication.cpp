@@ -90,6 +90,11 @@ int main() {
             secret //이미 읽어둔 값 재사용
         );
 
+        // PB 수신 -> 라우터
+        db_client->set_on_message_pb([router](const wire::Envelope& env) {
+            router->handle(env);
+            });
+
         // 여기서 주입
         AppContext::instance().session_manager = session_manager;
         AppContext::instance().data_handler = data_handler;
@@ -109,8 +114,9 @@ int main() {
         boost::asio::signal_set signals(io, SIGINT, SIGTERM);
         signals.async_wait([&](const boost::system::error_code&, int) {
             AppContext::instance().logger->info("Signal received. Shutting down...");
-            if (AppContext::instance().db_client)
-                AppContext::instance().db_client->stop();
+            if (auto db = AppContext::instance().db_client.lock()) {
+                db->stop();
+            }
             io.stop();
             });
 

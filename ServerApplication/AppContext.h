@@ -12,7 +12,7 @@ public:
     std::shared_ptr<spdlog::logger> logger;
     nlohmann::json config;
 
-    std::shared_ptr<DBMiddlewareClient> db_client;
+    std::weak_ptr<DBMiddlewareClient> db_client;
 
     std::weak_ptr<DataHandler>    data_handler;
     std::weak_ptr<SessionManager> session_manager;

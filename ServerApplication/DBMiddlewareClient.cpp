@@ -8,6 +8,8 @@
 #else
 #include <arpa/inet.h>
 #endif
+#include <nlohmann/json.hpp>
+#include "generated/wire.pb.h"
 
 using boost::asio::ip::tcp;
 
@@ -135,6 +137,22 @@ void DBMiddlewareClient::do_read_some() {
 
                 msg_buf_mgr_.append(read_buf_.data(), len);
                 while (auto opt = msg_buf_mgr_.extract_message()) {
+                    const std::string& raw = *opt;
+
+                    // 1. secret 접두어 제거
+                    std::string_view view(raw);
+                    if (view.size() >= secret_.size() && memcmp(view.data(), secret_.data(), secret_.size()) == 0) {
+                        view.remove_prefix(secret_.size());
+                    }
+
+                    // 2. Protobuf Envelope 시도
+                    wire::Envelope env;
+                    if (env.ParseFromArray(view.data(), (int)view.size())) {
+                        if (on_message_pb_) on_message_pb_(env);
+                        continue;
+                    }
+
+                    // 3. 실패하면 JSON 시도
                     try {
                         //JSON 파싱
                         auto j = nlohmann::json::parse(*opt);
@@ -300,4 +318,18 @@ void DBMiddlewareClient::arm_heartbeat_timer() {
                 // 재-arming
                 arm_heartbeat_timer();
             }));
+}
+
+void DBMiddlewareClient::send_proto(const google::protobuf::MessageLite& msg) {
+    std::string body;
+    body.reserve(msg.ByteSizeLong());
+    msg.SerializeToString(&body);    // 실패 체크는 필요시 추가
+    send_framed(body);
+}
+
+void DBMiddlewareClient::send_secure_proto(const google::protobuf::MessageLite& msg) {
+    std::string plain;
+    msg.SerializeToString(&plain);
+    std::string body = secret_ + plain;
+    send_framed(body);
 }

@@ -8,6 +8,7 @@
 #include <atomic>
 #include <future>
 #include <functional>
+#include "generated/wire.pb.h"
 
 class SessionManager;
 class DataHandler;
@@ -31,6 +32,8 @@ public:
 
     // DB 미들웨어 수신 메시지 엔트리 포인트
     void handle(const json& j);
+	// Protobuf 수신 메시지 엔트리 포인트
+    void handle(const wire::Envelope& env);
 
     // 커스텀 타입 핸들러 등록 (옵션)
     void register_handler(const std::string& type, Handler h);

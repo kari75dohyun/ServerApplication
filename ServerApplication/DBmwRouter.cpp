@@ -45,6 +45,64 @@ void DBmwRouter::handle(const json& j) {
     }
 }
 
+void DBmwRouter::handle(const wire::Envelope& env) {
+    using T = wire::MsgType;
+
+    switch (env.type()) {
+    case T::SERVER_LOGIN_ACK: {
+        const auto& ack = env.server_login_ack();
+        // JSON 버전과 동일한 처리
+        if (ack.result() == "ok") {
+            AppContext::instance().logger->info("[DBMW][PB] server_login_ack OK (nickname={})", ack.nickname());
+            // 로그인 성공 → 인증 플래그 켜기
+            if (auto cli = AppContext::instance().db_client.lock()) {
+                cli->mark_authed(true);
+            }
+        }
+        else {
+            AppContext::instance().logger->warn("[DBMW][PB] server_login_ack NG (nickname={})", ack.nickname());
+        }
+        break;
+    }
+    case T::KEEPALIVE_ACK: {
+        // 하트비트 응답 → 미스 카운터 리셋
+        if (auto cli = AppContext::instance().db_client.lock()) {
+            cli->note_heartbeat_ack();
+        }
+        break;
+    }
+    case T::DB_QUERY_RESULT: {
+        const auto& r = env.db_query_result();
+        // 기존 JSON 경로로 내려주던 구조에 맞춰 변환해 핸들링하거나,
+        // 직접 이 자리에서 세션/콜백 매칭 처리해도 됨
+        nlohmann::json j{
+            {"type","db_query_result"},
+            {"api", r.api()},
+            {"code", r.code()},
+            {"req_id", r.req_id()},
+            {"data", r.data_json()} // 서버는 일단 문자열로 받았다가 필요시 파싱
+        };
+        handle(j); // 기존 JSON 핸들러 재사용
+        break;
+    }
+    case T::ERROR_MSG: {
+        const auto& e = env.error();
+        nlohmann::json j{
+            {"type","db_error"},
+            {"code", e.code()},
+            {"req_id", e.req_id()},
+            {"msg", e.msg()}
+        };
+        handle(j);
+        break;
+    }
+    default:
+        AppContext::instance().logger->warn("[DBMW][PB] unhandled type={}", (int)env.type());
+        break;
+    }
+}
+
+
 /* =========================
  *   요청/응답 매칭 API
  * ========================= */

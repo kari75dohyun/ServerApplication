@@ -6,7 +6,7 @@ enum MsgType {
   SERVER_LOGIN_ACK = 1;
   KEEPALIVE_ACK = 2;
   DB_QUERY_RESULT = 3;
-  ERROR = 4;
+  ERROR_MSG = 4;
 }
 
 message ServerLoginAck { string result = 1; string nickname = 2; }

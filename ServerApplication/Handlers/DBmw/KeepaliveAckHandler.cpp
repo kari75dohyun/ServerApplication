@@ -6,7 +6,7 @@
 // DB 미들웨어로부터 keepalive_ack 를 받았을 때 호출되는 핸들러
 static void OnServerKeepAliveAck(DBmwRouter& /*router*/, const nlohmann::json& /*j*/) {
     // 하트비트 ACK를 받았으니 미수신 카운터를 리셋
-    if (auto client = AppContext::instance().db_client) {
+    if (auto client = AppContext::instance().db_client.lock()) {
         client->note_heartbeat_ack();
     }
 

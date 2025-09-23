@@ -216,28 +216,20 @@
   <ItemGroup>
     <CustomBuild Include="proto\wire.proto">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">if not exist "$(ProjectDir)generated" mkdir "$(ProjectDir)generated" &amp; "$(SolutionDir)vcpkg\installed\x64-windows\tools\protobuf\protoc.exe" -I"$(ProjectDir)proto" --cpp_out="$(ProjectDir)generated" "$(InputPath)"
-
-</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">cmd /c "call "$(SolutionDir)vcpkg\installed\x64-windows\tools\protobuf\protoc.exe" -I"$(ProjectDir)proto" --cpp_out="$(ProjectDir)generated" "%(FullPath)""</Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
       </AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)generated\$(InputName).pb.h;$(ProjectDir)generated\$(InputName).pb.cc</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)generated\%(Filename).pb.h;$(ProjectDir)generated\%(Filename).pb.cc</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Generate C++ from %(Filename).proto</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">if not exist "$(ProjectDir)generated" mkdir "$(ProjectDir)generated" &amp; "$(SolutionDir)vcpkg\installed\x64-windows\tools\protobuf\protoc.exe" -I"$(ProjectDir)proto" --cpp_out="$(ProjectDir)generated" "$(InputPath)"
-
-</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">cmd /c "call "$(SolutionDir)vcpkg\installed\x64-windows\tools\protobuf\protoc.exe" -I"$(ProjectDir)proto" --cpp_out="$(ProjectDir)generated" "%(FullPath)""</Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Generate C++ from %(Filename).proto</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">if not exist "$(ProjectDir)generated" mkdir "$(ProjectDir)generated" &amp; "$(SolutionDir)vcpkg\installed\x64-windows\tools\protobuf\protoc.exe" -I"$(ProjectDir)proto" --cpp_out="$(ProjectDir)generated" "$(InputPath)"
-
-</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">cmd /c "call "$(SolutionDir)vcpkg\installed\x64-windows\tools\protobuf\protoc.exe" -I"$(ProjectDir)proto" --cpp_out="$(ProjectDir)generated" "%(FullPath)""</Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Generate C++ from %(Filename).proto</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">if not exist "$(ProjectDir)generated" mkdir "$(ProjectDir)generated" &amp; "$(SolutionDir)vcpkg\installed\x64-windows\tools\protobuf\protoc.exe" -I"$(ProjectDir)proto" --cpp_out="$(ProjectDir)generated" "$(InputPath)"
-
-</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">cmd /c "call "$(SolutionDir)vcpkg\installed\x64-windows\tools\protobuf\protoc.exe" -I"$(ProjectDir)proto" --cpp_out="$(ProjectDir)generated" "%(FullPath)""</Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Generate C++ from %(Filename).proto</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ProjectDir)generated\$(InputName).pb.h;$(ProjectDir)generated\$(InputName).pb.cc</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ProjectDir)generated\$(InputName).pb.h;$(ProjectDir)generated\$(InputName).pb.cc</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)generated\$(InputName).pb.h;$(ProjectDir)generated\$(InputName).pb.cc</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ProjectDir)generated\%(Filename).pb.h;$(ProjectDir)generated\%(Filename).pb.cc</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ProjectDir)generated\%(Filename).pb.h;$(ProjectDir)generated\%(Filename).pb.cc</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)generated\%(Filename).pb.h;$(ProjectDir)generated\%(Filename).pb.cc</Outputs>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
       </AdditionalInputs>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">

@@ -257,15 +257,15 @@ const char descriptor_table_protodef_wire_2eproto[] ABSL_ATTRIBUTE_SECTION_VARIA
     "ve_ack\030\013 \001(\0132\022.wire.KeepaliveAckH\000\022.\n\017db"
     "_query_result\030\014 \001(\0132\023.wire.DbQueryResult"
     "H\000\022\034\n\005error\030\r \001(\0132\013.wire.ErrorH\000B\t\n\007payl"
-    "oad*_\n\007MsgType\022\013\n\007UNKNOWN\020\000\022\024\n\020SERVER_LO"
+    "oad*c\n\007MsgType\022\013\n\007UNKNOWN\020\000\022\024\n\020SERVER_LO"
     "GIN_ACK\020\001\022\021\n\rKEEPALIVE_ACK\020\002\022\023\n\017DB_QUERY"
-    "_RESULT\020\003\022\t\n\005ERROR\020\004b\006proto3"
+    "_RESULT\020\003\022\r\n\tERROR_MSG\020\004b\006proto3"
 };
 static ::absl::once_flag descriptor_table_wire_2eproto_once;
 PROTOBUF_CONSTINIT const ::_pbi::DescriptorTable descriptor_table_wire_2eproto = {
     false,
     false,
-    548,
+    552,
     descriptor_table_protodef_wire_2eproto,
     "wire.proto",
     &descriptor_table_wire_2eproto_once,

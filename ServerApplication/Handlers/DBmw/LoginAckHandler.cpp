@@ -11,8 +11,11 @@ static void OnServerLoginAck(DBmwRouter& router, const nlohmann::json& j) {
     if (result == "OK") {
         AppContext::instance().logger->info("[DBMW][RX] server_login_ack OK (nickname={})", nickname);
 
-        if (auto client = AppContext::instance().db_client) {
+        if (auto client = AppContext::instance().db_client.lock()) {
             client->mark_authed(true);  // 하트비트 활성화
+        }
+        else {
+            AppContext::instance().logger->warn("[DBMW] db_client expired before auth ack");
         }
 
         // (선택) 서버 클라에게 공지
@@ -25,7 +28,7 @@ static void OnServerLoginAck(DBmwRouter& router, const nlohmann::json& j) {
     }
     else {
         AppContext::instance().logger->warn("[DBMW][RX] server_login_ack NG: {}", j.dump());
-        if (auto client = AppContext::instance().db_client) {
+        if (auto client = AppContext::instance().db_client.lock()) {
             client->mark_authed(false);
             client->stop();   // 소켓/타이머 닫기
             client->start();  // 즉시 재연결 시도
