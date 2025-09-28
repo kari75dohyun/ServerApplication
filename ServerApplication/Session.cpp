@@ -47,6 +47,7 @@ int Session::get_session_id() const {
 void Session::post_task(std::function<void()> fn) {
     auto self = shared_from_this();
     //std::cout << "[DEBUG] post_task called (session_id=" << session_id_ << ")" << std::endl;
+	//dispatch => 즉시 처리 가능하면 실행 아니면 strand 큐에 넣기
     boost::asio::dispatch(strand_, [this, self, fn = std::move(fn)]() mutable {
         //std::cout << "[DEBUG] task enqueued" << std::endl;
         if (task_queue_.size() >= static_cast<size_t>(AppContext::instance().config.value("max_task_queue", 1000))) {
@@ -223,6 +224,10 @@ void Session::reset(boost::asio::ip::tcp::socket&& new_socket, int session_id) {
 
     generation_.fetch_add(1, std::memory_order_relaxed);
 
+    udp_token_.clear();
+    udp_token_issued_ = {};
+    udp_token_ttl_sec_ = 300; // 기본값(설정에서 다시 세팅됨)
+
     AppContext::instance().logger->info("[Session][reset] 세션 {} 내부 상태 초기화 완료", session_id_);
 }
 
@@ -305,6 +310,7 @@ void Session::close_session() {
         }
 
 		cleanup();  // 만약 제거가 안됐으면, 존에서 제거 및 풀 반환
+        clear_udp_token(); // 종료 시 토큰 정리
     }
     catch (const std::exception& e) {
         AppContext::instance().logger->error("[close_session] Exception: {}", e.what());
@@ -398,6 +404,7 @@ void Session::do_read()
         get_socket().async_read_some(
             buffer(get_data(), sizeof(data_)),
             boost::asio::bind_executor(strand, [this, self](const boost::system::error_code& ec, size_t length) {
+            // boost::asio::bind_executor는 이 함수에 strand라는 꼬리표를 붙여서 새로운 함수로 만들어 주세요.나중에 이 새 함수가 호출되면 그 때 strand에서 실행되게 된다. (실행 규칙을 가진 함수 생성)
                 // [2] 콜백 진입 시 반드시 해제!
                 release_read();
 
@@ -513,4 +520,10 @@ bool Session::checkUdpRateLimit() {
     else {
         return false;  // 너무 자주 보내서 차단
     }
+}
+
+void Session::set_udp_token(const std::string& token) {
+    udp_token_ = token;
+    udp_token_issued_ = std::chrono::steady_clock::now();
+    udp_token_ttl_sec_ = AppContext::instance().config.value("udp_token_ttl_seconds", 300);
 }

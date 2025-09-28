@@ -144,7 +144,7 @@ public:
 	// UDP 엔드포인트 만료 처리
     void expire_stale_udp_endpoints(std::chrono::seconds timeout);
 
-	// UDP Flood 방지 관련 Set, Get 함수 추가
+	// UDP Flood 방지 관련 Set, Get 함수 추가  사용하지 않음.
     void set_udp_total_packet_count(size_t count) {
         udp_total_packet_count_ = count;
 	}
@@ -152,6 +152,7 @@ public:
         return udp_total_packet_count_;
     }
     void inc_udp_total_packet_count() { ++udp_total_packet_count_; }
+
     void set_udp_total_packet_window(const std::chrono::steady_clock::time_point& window) {
         udp_total_packet_window_ = window;
     }

@@ -36,14 +36,46 @@ void DBmwRouter::register_handler(const std::string& type, Handler h) {
 
 void DBmwRouter::handle(const json& j) {
     const std::string type = j.value("type", "");
+    if (type == "db_query_result" || type == "db_error" || type == "dbmw_error" || type == "db_error_msg") {
+        const std::string req_id = j.value("req_id", "");
+        if (!req_id.empty()) {
+            auto self = shared_from_this();
+            boost::asio::dispatch(strand_, [this, self, req_id, j] {
+                auto it = pending_.find(req_id);
+                if (it == pending_.end()) return;
+                const bool ok = (j.value("type", "") == "db_query_result");
+                // 콜백 모드
+                if (it->second->use_callbacks) {
+                    auto on_ok = std::move(it->second->on_ok);
+                    auto on_err = std::move(it->second->on_error);
+                    fulfill_and_erase_locked(req_id, j, ok);
+                    if (ok && on_ok) on_ok(j);
+                    if (!ok && on_err) on_err(j);
+                    return;
+                }
+                // future 모드
+                fulfill_and_erase_locked(req_id, j, ok);
+                });
+            return;
+        }
+    }
+
+    // 등록된 커스텀 핸들러 우선
     auto it = handlers_.find(type);
-    if (it != handlers_.end()) {
-        it->second(j);
-    }
-    else {
-        AppContext::instance().logger->info("[DBMW][RX][UNKNOWN] {}", j.dump());
-    }
+    if (it != handlers_.end()) { it->second(j); return; }
+
+    AppContext::instance().logger->info("[DBMW][RX][UNKNOWN] {}", j.dump());
 }
+//void DBmwRouter::handle(const json& j) {
+//    const std::string type = j.value("type", "");
+//    auto it = handlers_.find(type);
+//    if (it != handlers_.end()) {
+//        it->second(j);
+//    }
+//    else {
+//        AppContext::instance().logger->info("[DBMW][RX][UNKNOWN] {}", j.dump());
+//    }
+//}
 
 void DBmwRouter::handle(const wire::Envelope& env) {
     using T = wire::MsgType;

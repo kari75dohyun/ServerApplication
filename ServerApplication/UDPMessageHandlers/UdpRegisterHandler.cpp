@@ -9,6 +9,15 @@
 void Udpregister_handler(std::shared_ptr<Session> session, const nlohmann::json& msg,
     const boost::asio::ip::udp::endpoint& from, boost::asio::ip::udp::socket& udp_socket)
 {
+    if (!session) return;
+
+    // 1.엔드포인트 고정
+    session->set_udp_endpoint(from);
+    session->update_udp_alive_time();
+
+    // 2.설정에서 TTL 가져와 반영 (없으면 기본값)
+    int ttl = AppContext::instance().config.value("udp_token_ttl_seconds", 300);
+    session->set_udp_token_ttl(ttl);
     // 별도 응답 필요시 이 곳에서 UDP로 전송
     // 랜덤 토큰 생성 및 저장
     std::string udp_token = generate_random_token();

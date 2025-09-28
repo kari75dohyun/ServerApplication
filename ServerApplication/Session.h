@@ -91,6 +91,9 @@ private:
     std::function<void(std::shared_ptr<Session>)> release_callback_;
     std::atomic<bool> released_{ false };
 
+    std::chrono::steady_clock::time_point udp_token_issued_{};
+    int udp_token_ttl_sec_ = 300; // 기본 5분(설정값으로 바꿀 수 있게)
+
 public:
     // 생성자: 클라이언트 소켓과 SSL 컨텍스트를 받아 SSL 스트림을 초기화
     Session(boost::asio::ip::tcp::socket socket, int session_id, std::weak_ptr<DataHandler> data_handler);
@@ -189,7 +192,7 @@ public:
     std::chrono::steady_clock::time_point get_last_udp_alive_time() const;
 
     // UDP 임시 토큰 
-	void set_udp_token(const std::string& token) { udp_token_ = token; }
+	//void set_udp_token(const std::string& token) { udp_token_ = token; }
     const std::string get_udp_token() const { return udp_token_; }
 
     // 세션 상태를 문자열로 변환 (디버깅용)
@@ -244,6 +247,32 @@ public:
     void mark_released() { released_.exchange(true); }
 
     void cleanup();
+
+    // 토큰 세터에 발급 시각 
+    void set_udp_token(const std::string& token);
+
+    // TTL 설정(설정파일에서 읽어 반영)
+    void set_udp_token_ttl(int secs) { udp_token_ttl_sec_ = secs; }
+
+    // 토큰 유효성 검사
+    bool is_udp_token_valid() const {
+        //if (udp_token_.empty()) return false;
+        //if (udp_token_ttl_sec_ <= 0) return true; // TTL 미사용 모드
+        //auto now = std::chrono::steady_clock::now();
+        //return (now - udp_token_issued_) <= std::chrono::seconds(udp_token_ttl_sec_);
+
+        if (udp_token_.empty() || udp_token_issued_.time_since_epoch().count() == 0)
+            return false;
+        auto now = std::chrono::steady_clock::now();
+        auto age = std::chrono::duration_cast<std::chrono::seconds>(now - udp_token_issued_).count();
+        return age <= udp_token_ttl_sec_;
+    }
+
+    // 토큰 클리어
+    void clear_udp_token() {
+        udp_token_.clear();
+        udp_token_issued_ = {};
+    }
 
 private:
     void do_write_queue();

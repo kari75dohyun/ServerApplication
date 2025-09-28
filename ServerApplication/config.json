@@ -21,4 +21,6 @@
   "dbmw_host": "127.0.0.1",
   "dbmw_port": 6789,
   "dbmw_heartbeat_sec": 20
+  "udp_token_ttl_seconds": 300,
+  "udp_expire_timeout_seconds": 300
 }
