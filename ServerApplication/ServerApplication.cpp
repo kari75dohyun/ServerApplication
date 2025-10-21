@@ -13,6 +13,7 @@
 #include "DBMiddlewareClient.h"
 #include "DBmwRouter.h"
 #include "DBmwHandlerRegistry.h"
+#include <curl/curl.h>
 
 using namespace std;
 using boost::asio::ip::tcp;
@@ -24,6 +25,14 @@ using namespace boost::asio;
 //constexpr size_t mzx_pool_size = 10000;  // session 풀을 1024개가 넘으면 자동 증가 하지만, max 사이즈 만큼은 못넘게 한다.
 
 int main() {
+    //libcurl 초기화
+    CURLcode global_init_res = curl_global_init(CURL_GLOBAL_DEFAULT);
+    if (global_init_res != CURLE_OK) {
+        std::cerr << "curl_global_init() failed: "
+            << curl_easy_strerror(global_init_res) << std::endl;
+        return 1;
+    }
+
     init_logger();
     AppContext::instance().logger->info("=== 서버 시작! ===");
     load_config();
@@ -147,5 +156,6 @@ int main() {
         AppContext::instance().logger->error("Exception: {}", e.what());
     }
 
+    curl_global_cleanup();  
     return 0;
 }

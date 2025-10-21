@@ -74,7 +74,7 @@ std::shared_ptr<Session> SessionPool::acquire(boost::asio::ip::tcp::socket&& soc
     sess->set_release_callback([this](std::shared_ptr<Session> s) {
         this->release(s);
         });
-
+	sess->cleanup();    // 내부 상태 초기화 (닉네임, 존 등)
     AppContext::instance().logger->info(
         "[SessionPool][acquire] idx={} | 풀 세션 수: {}, 가용 세션 수: {}, 사용 중 세션(풀 기준): {}", idx, pool_.size(),  reusable_indices_.size(), pool_.size() - reusable_indices_.size());
     return sess;
@@ -98,26 +98,25 @@ void SessionPool::release(std::shared_ptr<Session> session) {
     size_t idx = std::distance(pool_.begin(), it);
 
     // 2. 중복 release 방지 (unordered_set으로 검사)
-    {
-        //std::lock_guard<std::mutex> idx_lock(index_mutex_);  // 인덱스 동기화
-        if (available_index_set_.find(idx) != available_index_set_.end()) {
-            AppContext::instance().logger->critical("[SessionPool][release] 중복 release 감지! idx={}", idx);
-            send_admin_alert("[ALERT] SessionPool 중복 acquire 감지! idx=" + std::to_string(idx));
+    //std::lock_guard<std::mutex> idx_lock(index_mutex_);  // 인덱스 동기화
+    if (available_index_set_.find(idx) != available_index_set_.end()) {
+        AppContext::instance().logger->critical("[SessionPool][release] 중복 release 감지! idx={}", idx);
+        send_admin_alert("[ALERT] SessionPool 중복 acquire 감지! idx=" + std::to_string(idx));
 #ifndef NDEBUG
-            assert(false && "SessionPool::release: 중복 release 발생!");
+        assert(false && "SessionPool::release: 중복 release 발생!");
 #endif
-            return;
-        }
-        // released_ = true 처리!
-        session->mark_released();
-
-        // 중복이 아니면 set과 큐에 삽입
-        reusable_indices_.push(idx);
-        available_index_set_.insert(idx);
+        return;
     }
+    // released_ = true 처리!
+    session->cleanup();
+    session->mark_released();
+    session->set_active(false);
+
+    // 중복이 아니면 set과 큐에 삽입
+    reusable_indices_.push(idx);
+    available_index_set_.insert(idx);
 
     // 3. 정상 반환
-    session->set_active(false);
     //reusable_indices_.push(idx);
     AppContext::instance().logger->info("[SessionPool][release] idx={} 반환 (풀 총 세션 수: {}, 사용 중: {})",
         idx, pool_.size(), pool_.size() - reusable_indices_.size());

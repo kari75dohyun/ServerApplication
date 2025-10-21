@@ -53,40 +53,39 @@ void DataHandler::remove_session(int session_id) {
         return;
     }
 
-    // 세션 종료 시 매핑 제거
+    // 2. UDP 매핑 제거, 토큰 초기화
     if (session->get_udp_endpoint()) {
         std::lock_guard<std::mutex> lock(udp_endpoint_mutex_);
-        udp_endpoint_to_session_.erase(*session->get_udp_endpoint());
+        auto ep = *session->get_udp_endpoint();
+        auto it = udp_endpoint_to_session_.find(ep);
+        if (it != udp_endpoint_to_session_.end()) {
+            if (auto existing = it->second.lock()) {
+                if (existing == session) {
+                    udp_endpoint_to_session_.erase(it);
+                }
+            }
+            else {
+                udp_endpoint_to_session_.erase(it);
+            }
+        }
     }
 
     session->clear_udp_token();
 
-    // 2. ZoneManager에 세션 제거 요청.
+    // 3. ZoneManager에 세션 제거 요청.
     if (session->get_zone_id() > -1) {
         zone_manager_.remove_session(session);
     }
-    // 3. 반환받은 세션을 세션 풀로 반환 (락 범위 밖에서 안전하게)
-    if (session) {
-        // 전역 UDP 매핑 제거
-        std::lock_guard<std::mutex> lock(udp_endpoint_mutex_);
-        if (auto ep = session->get_udp_endpoint()) {
-            auto it = udp_endpoint_to_session_.find(*ep);
-            if (it != udp_endpoint_to_session_.end()) {
-                if (auto existing = it->second.lock()) {
-                    if (existing == session) {
-                        udp_endpoint_to_session_.erase(it);
-                    }
-                }
-                else {
-                    udp_endpoint_to_session_.erase(it);
-                }
-            }
-        }
-        auto pool = get_session_pool();
-        AppContext::instance().logger->info("[DEBUG] get_session_pool() 호출됨, 주소: {}", (void*)pool.get());
-        if (pool) {
-            pool->release(session);  // is_closed() 여부와 상관없이 반드시 release
-        }
+
+	// 4. 세션 풀로 반환 (락 범위 밖에서 안전하게)
+    if (auto pool = get_session_pool()) {
+        AppContext::instance().logger->info(
+            "[DEBUG] get_session_pool() 호출됨, 주소: {}", (void*)pool.get());
+        pool->release(session);
+    }
+    else {
+        AppContext::instance().logger->warn(
+            "[DataHandler] SessionPool not set; session {} will not be pooled", session_id);
     }
 }
 
@@ -382,159 +381,6 @@ void DataHandler::on_udp_receive(const std::string& msg,
     dispatcher_.dispatch_udp(session, msg, from, udp_socket);
 }
 
-//void DataHandler::on_udp_receive(const std::string& msg, const udp::endpoint& from, udp::socket& udp_socket) {
-//    AppContext::instance().logger->info("[DEBUG][UDP] DataHandler address: {}", (void*)this);
-//    AppContext::instance().logger->info("[DEBUG][UDP] SessionManager address: {}", (void*)session_manager_.get());
-//    // 1. 서버 전체 UDP 패킷 제한 (중복방지)
-//    //if (!check_total_udp_rate_limit(udp_total_packet_count_, udp_total_packet_window_, TOTAL_LIMIT_PER_SEC)) {
-//    if (!sharded_udp_rate_limit(udp_global_limiter_, static_cast<size_t>(static_cast<size_t>(AppContext::instance().config.value("total_limit_per_sec", 1000))))) {
-//        AppContext::instance().logger->warn("[UDP][FLOOD] 서버 전체 초과 ({}/1초)", udp_total_packet_count_.load());
-//        return;
-//    }
-//
-//    // 2. JSON 파싱
-//    auto jmsg_opt = try_parse_json(msg);
-//    if (!jmsg_opt) {
-//        std::string response = R"({"type":"error","msg":"Invalid JSON"})";
-//        auto data = std::make_shared<std::string>(response);
-//        udp_socket.async_send_to(
-//            boost::asio::buffer(*data), from,
-//            [data](const boost::system::error_code& ec, size_t) {
-//                if (ec) AppContext::instance().logger->error("[UDP] Send error2: {}", ec.message());
-//            }
-//        );
-//        return;
-//    }
-//    const auto& res = *jmsg_opt;
-//
-//    const std::string nickname = res.value("nickname", "");
-//    const std::string type = res.value("type", "");
-//    const std::string token = res.value("token", "");
-//
-//    // 3. 닉네임 체크
-//    if (nickname.empty()) {
-//        AppContext::instance().logger->warn("[UDP] 임의 패킷 차단: 닉네임 없음 / EP({}:{})", from.address().to_string(), from.port());
-//        return;
-//    }
-//
-//    // 4. 세션 조회
-//    auto session = session_manager_->find_session_by_nickname(nickname);
-//    if (!session) {
-//        AppContext::instance().logger->warn("[UDP] 임의 패킷 차단: 닉네임({})/EP({}:{})", nickname, from.address().to_string(), from.port());
-//        return;
-//    }
-//
-//    // 5. 토큰 검사 (udp_register만 예외)
-//    if (type != "udp_register") {
-//        // 1,토큰 존재 + 일치
-//        if (token.empty() || session->get_udp_token() != token) {
-//            AppContext::instance().logger->warn("[UDP] Invalid or missing udp_token! nickname={}, remote_ep={}", nickname, from.address().to_string());
-//            nlohmann::json resp = { {"type", "error"}, {"msg", token.empty() ? "UDP token is required" : "Invalid UDP token"} };
-//            auto data = std::make_shared<std::string>(resp.dump());
-//            udp_socket.async_send_to(boost::asio::buffer(*data), from, [data](const boost::system::error_code&, size_t) {});
-//            return;
-//        }
-//
-//        // 2. 토큰 TTL 검사
-//        if (!session->is_udp_token_valid()) {
-//            nlohmann::json resp = { {"type","error"}, {"msg","UDP token expired, please udp_register again"} };
-//            auto data = std::make_shared<std::string>(resp.dump());
-//            udp_socket.async_send_to(boost::asio::buffer(*data), from, [data](auto, auto) {});
-//            // 만료된 토큰은 정리(선택)
-//            session->clear_udp_token();
-//            return;
-//        }
-//
-//        // 3. 엔드포인트 일치 확인 (★ 바인딩 핵심)
-//        auto bound_ep = session->get_udp_endpoint();
-//        if (!bound_ep || *bound_ep != from) {
-//            AppContext::instance().logger->warn("[UDP] Endpoint mismatch (bound={}:{}, from={}:{}) nickname={}",
-//                bound_ep ? bound_ep->address().to_string() : "N/A",
-//                bound_ep ? bound_ep->port() : 0,
-//                from.address().to_string(),
-//                from.port(),
-//                nickname);
-//
-//            nlohmann::json resp = { {"type","error"}, {"msg","Endpoint mismatch; please udp_register again"} };
-//            auto data = std::make_shared<std::string>(resp.dump());
-//            udp_socket.async_send_to(boost::asio::buffer(*data), from, [data](const boost::system::error_code&, size_t) {});
-//            return;
-//        }
-//    }
-//    else {
-//        // type == udp_register일 때만 엔드포인트를 갱신/등록
-//        auto prev_ep = session->get_udp_endpoint();
-//        if (!prev_ep || *prev_ep != from) {
-//            // 전역 매핑 갱신 (락 최소구간)
-//            {
-//                std::lock_guard<std::mutex> lock(udp_endpoint_mutex_);
-//                if (prev_ep && *prev_ep != from) {
-//                    udp_endpoint_to_session_.erase(*prev_ep);
-//                }
-//                udp_endpoint_to_session_[from] = session;
-//            }
-//            session->set_udp_endpoint(from);
-//        }
-//    }
-//
-//    // 6. 유저별 UDP Flood 제한
-//    if (!session->checkUdpRateLimit()) {
-//    AppContext::instance().logger->warn("[UDP][FLOOD] 유저({}) 초과! IP({}:{})",
-//        session->get_nickname(), from.address().to_string(), from.port());
-//
-//    nlohmann::json resp = {
-//        {"type", "error"},
-//        {"msg", "UDP rate limit exceeded"}
-//    };
-//    auto data = std::make_shared<std::string>(resp.dump());
-//    udp_socket.async_send_to(boost::asio::buffer(*data), from,
-//        [data](const boost::system::error_code& ec, size_t) {
-//            if (ec) {
-//                AppContext::instance().logger->warn("[UDP] UDP rate limit 응답 전송 실패: {}", ec.message());
-//            }
-//        });
-//        return;
-//    }
-//    //if (!check_user_udp_rate_limit(*session, static_cast<size_t>(AppContext::instance().config.value("user_limit_per_sec", 10)))) {
-//    //    AppContext::instance().logger->warn("[UDP][FLOOD] 유저({}) 초과 ({}/1초)", session->get_nickname(), session->get_udp_packet_count());
-//    //    nlohmann::json resp = { {"type", "error"}, {"msg", "UDP rate limit exceeded"} };
-//    //    auto data = std::make_shared<std::string>(resp.dump());
-//    //    udp_socket.async_send_to(boost::asio::buffer(*data), from,
-//    //        [data](const boost::system::error_code& ec, size_t) {
-//    //            AppContext::instance().logger->warn("[UDP][브로드캐스트] 전송 에러 1{}", ec.message());
-//    //        });
-//    //    return;
-//    //}
-//
-//    // 7. 엔드포인트 변화 감지 및 갱신
-//    auto prev_ep = session->get_udp_endpoint();
-//    if (!prev_ep || *prev_ep != from) {
-//        AppContext::instance().logger->info(
-//            "[UDP] endpoint 변경 감지! 이전: {}:{} → 신규: {}:{}",
-//            prev_ep ? prev_ep->address().to_string() : "N/A",
-//            prev_ep ? prev_ep->port() : 0,
-//            from.address().to_string(),
-//            from.port()
-//        );
-//
-//        // 전역 매핑 업데이트 (락으로 보호)
-//        {
-//            std::lock_guard<std::mutex> lock(udp_endpoint_mutex_);
-//            if (prev_ep && *prev_ep != from) {
-//                udp_endpoint_to_session_.erase(*prev_ep);   // 이전 매핑 제거(없어도 안전)
-//            }
-//            udp_endpoint_to_session_[from] = session;       // 신규 매핑 등록/갱신
-//        }
-//
-//        // 세션 내부 상태 갱신 (락 밖에서)
-//        session->set_udp_endpoint(from);
-//    }
-//    session->update_udp_alive_time();
-//
-//    // 8. dispatcher에 전달 (모든 검증 완료 후!)
-//    dispatcher_.dispatch_udp(session, msg, from, udp_socket);
-//}
-
 void DataHandler::udp_broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname) {
     // strand에서 모든 송신 예약(동시에 중첩 안됨, 순서 보장)
     // boost::asio::post 이 함수를 지금 바로 strand의 작업 큐에 넣어주세요. (즉시 실행 요청)
@@ -567,81 +413,6 @@ void DataHandler::udp_broadcast(const std::string& msg, boost::asio::ip::udp::so
             });
         });
 }
-
-
-//void DataHandler::udp_broadcast(const std::string& msg, boost::asio::ip::udp::socket& udp_socket, const std::string& sender_nickname) {
-//    boost::asio::post(*udp_send_strand_, [this, msg, &udp_socket, sender_nickname]() {
-//        // 큐 사이즈가 넘치면 오래된 것부터 제거
-//        while (udp_send_queue_.size() >= static_cast<size_t>(AppContext::instance().config.value("max_udp_queue_size", 10000))) {
-//            AppContext::instance().logger->warn("[UDP][Global] udp_send_queue_ overflow (size={}), dropping oldest", udp_send_queue_.size());
-//            udp_send_queue_.pop();
-//        }
-//        //if (udp_send_queue_.size() > kMaxUdpQueueSize) {
-//            //// 정책1: 새 메시지 drop 및 경고
-//            //g_logger->warn("[UDP][Global] udp_send_queue_ overflow (size={}) - dropping message", udp_send_queue_.size());
-//            //return;
-//        //}
-//        for_each_session([&](const std::shared_ptr<Session> sess) {
-//            if (!sess) return;
-//            if (sess->get_nickname().empty()) return;
-//            if (sess->get_nickname() == sender_nickname) return; // 자기 자신 제외
-//
-//            auto udp_ep = sess->get_udp_endpoint();
-//            if (udp_ep) {
-//                nlohmann::json recv = nlohmann::json::parse(msg);
-//                nlohmann::json send;
-//                send["type"] = recv.value("type", "");
-//                send["nickname"] = recv.value("nickname", "");
-//                send["msg"] = recv.value("msg", "");
-//                auto data = std::make_shared<std::string>(send.dump());
-//                udp_send_queue_.emplace(data, *udp_ep);
-//            }
-//            });
-//
-//        // 큐 송신 시도
-//        try_send_next_udp(udp_socket);
-//        });
-//}
-
-//void DataHandler::try_send_next_udp(boost::asio::ip::udp::socket& udp_socket) {
-//    if (udp_send_in_progress_ || udp_send_queue_.empty()) {
-//        return;
-//    }
-//    udp_send_in_progress_ = true;
-//
-//    auto [data, ep] = udp_send_queue_.front();
-//    udp_send_queue_.pop();
-//
-//    // === 안전성 체크 ===
-//    if (!data || data->empty()) {
-//        AppContext::instance().logger->error("[try_send_next_udp] data is nullptr or empty!");
-//        udp_send_in_progress_ = false;
-//        return;
-//    }
-//    if (ep.address().is_unspecified() || ep.port() == 0) {
-//        AppContext::instance().logger->error("[try_send_next_udp] endpoint is unspecified/zero! {}:{}", ep.address().to_string(), ep.port());
-//        udp_send_in_progress_ = false;
-//        return;
-//    }
-//    if (!udp_socket.is_open()) {
-//        AppContext::instance().logger->error("[try_send_next_udp] udp_socket is closed!");
-//        udp_send_in_progress_ = false;
-//        return;
-//    }
-//
-//    udp_socket.async_send_to(
-//        boost::asio::buffer(*data), ep,
-//        boost::asio::bind_executor(*udp_send_strand_,
-//            [this, &udp_socket, data](const boost::system::error_code& ec, std::size_t /*bytes*/) {
-//                if (ec) {
-//                    AppContext::instance().logger->warn("[UDP][send queue][strand] {} {}", ec.message(), "async_send_to 에러");
-//                }
-//                udp_send_in_progress_ = false;
-//                try_send_next_udp(udp_socket);
-//            }
-//        )
-//    );
-//}
 
 // 미인증 세션 정리 함수 
 void DataHandler::cleanup_unauth_sessions(size_t max_unauth) {

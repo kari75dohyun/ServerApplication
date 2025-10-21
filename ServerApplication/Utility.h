@@ -51,11 +51,20 @@ inline bool sharded_udp_rate_limit(UdpRateLimiterShard& limiter, size_t limit_pe
 
     int64_t old_sec = limiter.window_secs[idx].load(std::memory_order_relaxed);
     if (now_sec != old_sec) {
-        limiter.window_secs[idx].store(now_sec, std::memory_order_relaxed);
-        limiter.counts[idx].store(0, std::memory_order_relaxed);
+        // CAS로 윈도우 전환 시도 (성공한 스레드만 reset)
+        if (limiter.window_secs[idx].compare_exchange_strong(old_sec, now_sec,
+            std::memory_order_acq_rel, std::memory_order_relaxed)) {
+            limiter.counts[idx].store(0, std::memory_order_relaxed);
+        }
+        // 실패했다면 이미 다른 스레드가 reset 했으므로 그냥 진행
+
+        //limiter.window_secs[idx].store(now_sec, std::memory_order_relaxed);
+        //limiter.counts[idx].store(0, std::memory_order_relaxed);
     }
+    // 카운트 증가
     limiter.counts[idx].fetch_add(1, std::memory_order_relaxed);
 
+	// 전체 합산
     size_t total = 0;
     for (size_t i = 0; i < shard_count; ++i) {
         total += limiter.counts[i].load(std::memory_order_relaxed);

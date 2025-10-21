@@ -26,6 +26,9 @@ private:
 
     size_t write_queue_overflow_count_ = 0;          // 연속 overflow count
 
+    // DataHandler를 안전하게 가져오는 헬퍼 함수
+    std::shared_ptr<DataHandler> get_handler_safe();
+
     //static constexpr size_t max_write_queue_size = 100;            // 임계치2: queue 최대 길이
     //static constexpr size_t write_queue_warn_threshold = 80;       // 임계치1: 경고 임계(80%)
     //static constexpr size_t write_queue_overflow_limit = 10;       // 임계치3: 연속 FULL 세션 종료 한계

@@ -13,7 +13,8 @@ DBmwRouter::DBmwRouter(boost::asio::io_context& io,
     : io_(io),
     strand_(boost::asio::make_strand(io)),
     session_manager_(std::move(session_manager)),
-    data_handler_(std::move(data_handler)) {
+    data_handler_(std::move(data_handler)),
+    metrics_timer_(io) {
     // 기본 핸들러
     //handlers_.emplace("login_ok", [this](const json& j) { handle_login_ok(j); });
     //handlers_.emplace("keepalive_ack", [this](const json& j) { handle_keepalive_ack(j); });
@@ -496,4 +497,36 @@ void DBmwRouter::log_metrics() const {
     AppContext::instance().logger->info(
         "[DBMW][Metrics] sent={}, ok={}, timeout={}, retry={}, failed={}",
         m.sent, m.ok, m.timed_out, m.retried, m.failed);
+}
+
+void DBmwRouter::start_metrics_timer(std::chrono::seconds interval) {
+    schedule_next_metrics(interval);
+}
+
+void DBmwRouter::schedule_next_metrics(std::chrono::seconds interval) {
+    auto self = shared_from_this();
+    metrics_timer_.expires_after(interval);
+    metrics_timer_.async_wait([this, self, interval](const boost::system::error_code& ec) {
+        if (ec) return; // cancel된 경우
+
+        try {
+            this->log_metrics();
+
+            int current_timeouts = 0;
+            if (auto db = AppContext::instance().db_client.lock()) {
+                current_timeouts = db->get_timeout_count();
+            }
+
+            if (current_timeouts - last_timeout_count_.load() > 50) { // 60초 동안 타임아웃 50건 이상 증가
+                send_admin_alert("[DBmwRouter] ALERT: Timeout surge detected! count=" + std::to_string(current_timeouts));
+            }
+            last_timeout_count_ = current_timeouts;
+        }
+        catch (const std::exception& e) {
+            AppContext::instance().logger->error("[DBmwRouter] log_metrics timer error: {}", e.what());
+        }
+
+        // 다음 주기 예약
+        schedule_next_metrics(interval);
+        });
 }

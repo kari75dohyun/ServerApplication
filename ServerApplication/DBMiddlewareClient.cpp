@@ -28,7 +28,8 @@ DBMiddlewareClient::DBMiddlewareClient(boost::asio::io_context& io,
     port_(port),
     server_login_nickname_(std::move(login_nickname)),
     secret_(std::move(secret)),
-    on_message_(std::move(on_message)) {
+    on_message_(std::move(on_message)),
+    timeout_count_(0) {
 }
 
 
@@ -255,15 +256,84 @@ void DBMiddlewareClient::send_framed(const std::string& body) {
         });
 }
 
+std::string DBMiddlewareClient::generate_request_id() {
+   static std::atomic<uint64_t> counter{ 0 };
+   uint64_t id = ++counter;
+   return "req_" + std::to_string(id);
+}
+
 //  JSON만 body로 -> 프레이밍 후 전송
-void DBMiddlewareClient::send_json(const nlohmann::json& j) {
-    send_framed(j.dump());
+void DBMiddlewareClient::send_json(nlohmann::json j) {
+    // 1) 요청 ID 붙이기 (없으면 생성)
+    std::string req_id;
+    if (j.contains("request_id")) {
+        req_id = j["request_id"].get<std::string>();
+    }
+    else {
+        req_id = generate_request_id(); // UUID나 증가 카운터
+        j["request_id"] = req_id;
+    }
+
+    auto payload = j.dump();
+    send_framed(payload);   // 기존 전송
+
+	// 2) 타이머 생성 (5초)
+    auto timer = std::make_shared<boost::asio::steady_timer>(strand_);
+    timer->expires_after(std::chrono::seconds(5));
+    {
+        std::lock_guard<std::mutex> lock(request_timers_mutex_);
+        request_timers_[req_id] = timer;
+    }
+
+    // 3) 타임아웃 핸들러
+    auto self = shared_from_this();
+    timer->async_wait([this, self, req_id, timer](const boost::system::error_code& ec) {
+        if (!ec) {
+            timeout_count_.fetch_add(1, std::memory_order_relaxed);
+            AppContext::instance().logger->warn("[DBMW] Request timeout detected! id={}", req_id);
+            // 여기서 세션 끊거나 alert 전송 가능
+        }
+        // 완료된 timer는 map에서 제거
+        std::lock_guard<std::mutex> lock(request_timers_mutex_);
+        request_timers_.erase(req_id);
+        });
 }
 
 // secret + JSON -> 프레이밍 후 전송 (login/keepalive 전용)
-void DBMiddlewareClient::send_secure_json(const nlohmann::json& j) {
+void DBMiddlewareClient::send_secure_json(nlohmann::json j) {
+    //std::string body = secret_ + j.dump();
+    //send_framed(body);
+    // 요청 ID 삽입
+    std::string req_id;
+    if (j.contains("request_id")) {
+        req_id = j["request_id"].get<std::string>();
+        
+    }
+    else {
+        req_id = generate_request_id();
+        j["request_id"] = req_id;
+    }
+    
     std::string body = secret_ + j.dump();
     send_framed(body);
+    // 요청별 타이머 (5초)
+    auto timer = std::make_shared<boost::asio::steady_timer>(strand_);
+    timer->expires_after(std::chrono::seconds(5));
+    {
+        std::lock_guard<std::mutex> lock(request_timers_mutex_);
+        request_timers_[req_id] = timer;
+    }
+
+    auto self = shared_from_this();
+    timer->async_wait([this, self, req_id, timer](const boost::system::error_code& ec) {
+        if (!ec) {
+            timeout_count_.fetch_add(1, std::memory_order_relaxed);
+            AppContext::instance().logger->warn("[DBMW] Secure request timeout: req_id={}", req_id);
+        }
+        // 완료된 timer는 map에서 제거
+        std::lock_guard<std::mutex> lock(request_timers_mutex_);
+        request_timers_.erase(req_id);
+        });
 }
 
 /* =========================

@@ -25,7 +25,8 @@ void UDPManager::start_receive() {
     socket_.async_receive_from(
         boost::asio::buffer(buffer_), remote_endpoint_,
         [this](const boost::system::error_code& ec, std::size_t bytes_recvd) {
-            if (!ec && bytes_recvd > 0 && bytes_recvd <= 4096) {
+            size_t max_udp_packet_size = AppContext::instance().config.value("max_udp_packet_size", 1024);
+            if (!ec && bytes_recvd > 0 && bytes_recvd <= max_udp_packet_size) {
                 auto msg = std::make_shared<std::string>(buffer_.data(), bytes_recvd);
 
                 if (auto handler = data_handler_.lock()) {
@@ -86,7 +87,7 @@ void UDPManager::start_receive() {
                     }
                 }
             }
-            else if (bytes_recvd == 0 || bytes_recvd > 4096) {
+            else if (bytes_recvd == 0 || bytes_recvd > max_udp_packet_size) {
                 AppContext::instance().logger->warn("[UDP] Invalid packet size: {}", bytes_recvd);
                 start_receive();
                 return;

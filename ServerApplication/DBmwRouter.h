@@ -71,6 +71,8 @@ public:
     };
     Metrics metrics_snapshot() const;
     void    log_metrics() const;
+    // 타이머 시작
+    void start_metrics_timer(std::chrono::seconds interval = std::chrono::seconds(60));
 
 private:
     // 내부 핸들러들
@@ -114,6 +116,12 @@ private:
 
     std::shared_ptr<SessionManager> session_manager_;
     std::shared_ptr<DataHandler>    data_handler_;
+
+    boost::asio::steady_timer metrics_timer_;
+    // 상태 기록 (예: 최근 타임아웃 수)
+    std::atomic<int> last_timeout_count_{ 0 };
+
+    void schedule_next_metrics(std::chrono::seconds interval);
 
     // 송신 함수(주입)
     std::function<void(const json&)> send_json_fn_;

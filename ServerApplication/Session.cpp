@@ -44,6 +44,19 @@ int Session::get_session_id() const {
     return session_id_;
 }
 
+std::shared_ptr<DataHandler> Session::get_handler_safe() {
+    auto handler = data_handler_.lock();
+    if (!handler) {
+        AppContext::instance().logger->error(
+            "[Session::get_handler_safe] DataHandler expired! session_id={}",
+            session_id_
+        );
+        // DataHandler가 없으면 세션도 더 이상 의미 없음
+        close_session();
+    }
+    return handler;
+}
+
 void Session::post_task(std::function<void()> fn) {
     auto self = shared_from_this();
     //std::cout << "[DEBUG] post_task called (session_id=" << session_id_ << ")" << std::endl;
@@ -275,8 +288,8 @@ void Session::enqueue_write(std::shared_ptr<std::string> msg) {
         if (write_queue_overflow_count_ >= static_cast<size_t>(AppContext::instance().config.value("write_queue_overflow_limit", 10))) {
             AppContext::instance().logger->error("[Session][enqueue_write] write_queue FULL 연속 {}회, 세션 종료!", write_queue_overflow_count_);
             closed_ = true;
-            // 실제 종료 처리가 필요하다면 여기에 추가!
-            // 예: socket_.lowest_layer().close();
+            //실제 종료 실행
+            close_session();
             return;
         }
     }
@@ -292,15 +305,20 @@ void Session::close_session() {
     if (closed_.exchange(true)) return;
     set_state(SessionState::Closed);
 
-    auto self = shared_from_this();
+    // 타이머 취소
+    login_timer_.cancel();
+    retry_timer_.cancel();
+
+    //auto self = shared_from_this();
 
     try {
         // TCP 소켓 안전하게 닫기 (비동기 종료 없음)
         boost::system::error_code ec;
 
+		socket_.cancel(ec);
+        if (ec) AppContext::instance().logger->warn("[close_session] socket cancel error: {}", ec.message());
         socket_.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
         if (ec) AppContext::instance().logger->error("[close_session] tcp shutdown error: {}", ec.message());
-
         socket_.close(ec);
         if (ec) AppContext::instance().logger->error("[close_session] tcp close error: {}", ec.message());
 
@@ -308,9 +326,12 @@ void Session::close_session() {
         if (auto handler = data_handler_.lock()) {
             handler->remove_session(session_id_);
         }
+        else 
+        {
+            AppContext::instance().logger->warn("[close_session] DataHandler expired while closing session {}", session_id_);
+        }
 
-		cleanup();  // 만약 제거가 안됐으면, 존에서 제거 및 풀 반환
-        clear_udp_token(); // 종료 시 토큰 정리
+		cleanup();  
     }
     catch (const std::exception& e) {
         AppContext::instance().logger->error("[close_session] Exception: {}", e.what());
@@ -318,48 +339,98 @@ void Session::close_session() {
 }
 
 void Session::cleanup() {
-    auto self = shared_from_this();
+    //내부 상태 초기화 (재사용 준비)
+    nickname_.clear();
+    line_buffer_.clear();
+    message_.clear();
+    memset(data_, 0, sizeof(data_));
 
-    // 1) 존에서 제거 (존에 등록돼 있을 경우만)
-    if (zone_id_ != -1) {
-        int old_zone_id = zone_id_;  // 로그 정확도를 위해 제거 전 값 보존
-        auto zone_ptr = get_zone();
-        if (zone_ptr) {
-            zone_ptr->remove_session(self);
-            set_zone_id(-1);   // 세션의 zone_id 초기화
-            clear_zone();      // 세션의 zone 정보 초기화
-            AppContext::instance().logger->info(
-                "[Session] 존에서 세션 제거 완료: zone_id={}, session_id={}",
-                old_zone_id, session_id_);
-        }
-        else {
-            AppContext::instance().logger->warn(
-                "[Session] 존 포인터 없음. 제거 스킵: zone_id={}, session_id={}",
-                old_zone_id, session_id_);
-            // 그래도 내부 상태는 초기화
-            set_zone_id(-1);
-            clear_zone();
-        }
-    }
+    // UDP 관련 초기화 (엔드포인트는 DataHandler가 remove_session 시점에 이미 제거된 상태여야 함)
+    udp_endpoint_.reset();
+    udp_ep_update_time_ = std::chrono::steady_clock::time_point{};
+    last_udp_alive_time_.store(std::chrono::steady_clock::time_point{});
+    udp_token_.clear();
 
-    // 2) Pool 반환 (세션 풀 사용 시)
-    if (released_.exchange(true)) {
-        // 이미 반환 처리된 경우
-        AppContext::instance().logger->info(
-            "[Session] 이미 풀 반환된 세션입니다. session_id={}", session_id_);
-        return;
+    // UDP flood counters
+    udp_packet_count_ = 0;
+    udp_packet_window_ = std::chrono::steady_clock::time_point{};
+
+    // 존 관련: 내부 필드만 초기화(존 오브젝트에서의 제거는 DataHandler/ZoneManager 책임)
+
+    zone_.reset();
+    zone_id_ = -1;
+
+    // task / write 큐 정리 (비동기 작업이 남아있으면 문제가 될 수 있으므로 안전하게 비운다.
+    {
+        while (!task_queue_.empty()) task_queue_.pop();
+        while (!write_queue_.empty()) write_queue_.pop();
     }
 
-    if (release_callback_) {
-        // 풀로 반환
-        release_callback_(self);
-    }
-    else {
-        AppContext::instance().logger->warn(
-            "[Session] release_callback_ 이 설정되지 않음! 세션이 풀로 반환되지 않을 수 있음. session_id={}",
-            session_id_);
-    }
+    // 타이머 취소
+    boost::system::error_code ec;
+    login_timer_.cancel();
+    retry_timer_.cancel();
+
+    // 세대 증가(이전 async 콜백들이 더이상 유효하지 않음을 보장)
+    generation_.fetch_add(1, std::memory_order_relaxed);
+
+    // 활성/closed 플래그 재설정
+    closed_.store(false);
+
+    read_pending_.store(false);
+
+    task_running_ = false;
+
+    nickname_registered_.store(false);
+
+    active_.store(false);
+
+    AppContext::instance().logger->info("[Session::cleanup] session_id={} internal state cleared (no zone/pool ops)", session_id_);
 }
+
+//void Session::cleanup() {
+//    auto self = shared_from_this();
+//
+//    // 1) 존에서 제거 (존에 등록돼 있을 경우만)
+//    if (zone_id_ != -1) {
+//        int old_zone_id = zone_id_;  // 로그 정확도를 위해 제거 전 값 보존
+//        auto zone_ptr = get_zone();
+//        if (zone_ptr) {
+//            zone_ptr->remove_session(self);
+//            set_zone_id(-1);   // 세션의 zone_id 초기화
+//            clear_zone();      // 세션의 zone 정보 초기화
+//            AppContext::instance().logger->info(
+//                "[Session] 존에서 세션 제거 완료: zone_id={}, session_id={}",
+//                old_zone_id, session_id_);
+//        }
+//        else {
+//            AppContext::instance().logger->warn(
+//                "[Session] 존 포인터 없음. 제거 스킵: zone_id={}, session_id={}",
+//                old_zone_id, session_id_);
+//            // 그래도 내부 상태는 초기화
+//            set_zone_id(-1);
+//            clear_zone();
+//        }
+//    }
+//
+//    // 2) Pool 반환 (세션 풀 사용 시)
+//    if (released_.exchange(true)) {
+//        // 이미 반환 처리된 경우
+//        AppContext::instance().logger->info(
+//            "[Session] 이미 풀 반환된 세션입니다. session_id={}", session_id_);
+//        return;
+//    }
+//
+//    if (release_callback_) {
+//        // 풀로 반환
+//        release_callback_(self);
+//    }
+//    else {
+//        AppContext::instance().logger->warn(
+//            "[Session] release_callback_ 이 설정되지 않음! 세션이 풀로 반환되지 않을 수 있음. session_id={}",
+//            session_id_);
+//    }
+//}
 
 //void Session::cleanup() {
 //    auto self = shared_from_this();
@@ -398,12 +469,16 @@ void Session::do_read()
         AppContext::instance().logger->info("[WARN] 중복 do_read 감지! session_id= {}", get_session_id());
         return;
     }
+
+    auto handler = get_handler_safe();
+    if (!handler) return; // 이미 close_session() 호출됨
+
     // do_read를 직접 호출하지 않고, post_task로 감싼다.
-    post_task([this, self]() {
+    post_task([this, self, handler]() {
         auto& strand = get_strand();
         get_socket().async_read_some(
             buffer(get_data(), sizeof(data_)),
-            boost::asio::bind_executor(strand, [this, self](const boost::system::error_code& ec, size_t length) {
+            boost::asio::bind_executor(strand, [this, self, handler](const boost::system::error_code& ec, size_t length) {
             // boost::asio::bind_executor는 이 함수에 strand라는 꼬리표를 붙여서 새로운 함수로 만들어 주세요.나중에 이 새 함수가 호출되면 그 때 strand에서 실행되게 된다. (실행 규칙을 가진 함수 생성)
                 // [2] 콜백 진입 시 반드시 해제!
                 release_read();
@@ -417,10 +492,20 @@ void Session::do_read()
                         while (auto opt_msg = get_msg_buffer().extract_message()) {
                             try {
                                 json msg = json::parse(*opt_msg);
+                                handler->dispatch(self, msg);
 
-                                if (auto handler = data_handler_.lock()) {
-                                    handler->dispatch(self, msg);  // 바로 이렇게!
-                                }
+                                //if (auto handler = data_handler_.lock()) {
+                                //    handler->dispatch(self, msg);
+                                //}
+                                //else {
+                                //    AppContext::instance().logger->error(
+                                //        "[Session::do_read] DataHandler expired, cannot dispatch message. session_id={}",
+                                //        session_id_
+                                //    );
+                                //    // 서버 종료 중이거나 심각한 상태 - 세션 종료
+                                //    close_session();
+                                //    return;
+                                //}
                             }
                             catch (const exception& e) {
                                 cerr << "[JSON parsing error] " << e.what() << " / data: " << *opt_msg << endl;
@@ -448,9 +533,21 @@ void Session::do_read()
                         notice["type"] = "notice";
                         notice["msg"] = nickname + " has left.";
                         // broadcast는 data_handler로 위임
-                        if (auto handler = data_handler_.lock()) {
-                            handler->broadcast(notice.dump() + "\n", get_session_id(), self);
-                        }
+                        handler->broadcast(notice.dump() + "\n", get_session_id(), self);
+
+                        //if (auto handler = data_handler_.lock()) {
+                        //    handler->broadcast(notice.dump() + "\n", get_session_id(), self);
+                        //}
+                        //else {
+                        //    AppContext::instance().logger->warn(
+                        //        "[Session::do_read] DataHandler expired, cannot broadcast. session_id={}",
+                        //        session_id_
+                        //    );
+                        //    // 브로드캐스트는 중요하지 않으면 무시 가능
+                        //    // 중요하다면 세션 종료
+                        //    // close_session();
+                        //}
+
                         //broadcast(notice.dump() + "\n", self->get_session_id(), self);
 
                         self->close_session();  // 세션 종료
@@ -467,10 +564,20 @@ void Session::do_read()
                             notice["type"] = "notice";
                             notice["msg"] = nickname + " has left.";
                             // broadcast는 data_handler로 위임
-                            if (auto handler = data_handler_.lock()) {
-                                handler->broadcast(notice.dump() + "\n", get_session_id(), self);
-                            }
-                            //broadcast(notice.dump() + "\n", self->get_session_id(), self);
+                            handler->broadcast(notice.dump() + "\n", get_session_id(), self);
+
+                            //if (auto handler = data_handler_.lock()) {
+                            //    handler->broadcast(notice.dump() + "\n", get_session_id(), self);
+                            //} else {
+                            //    AppContext::instance().logger->warn(
+                            //        "[Session::do_read] DataHandler expired, cannot broadcast. session_id={}",
+                            //        session_id_
+                            //    );
+                            //    // 브로드캐스트는 중요하지 않으면 무시 가능
+                            //    // 중요하다면 세션 종료
+                            //    // close_session();
+                            //}
+
                             std::cout << "Client with nickname '" << nickname << "' disconnected." << std::endl;
                         }
 

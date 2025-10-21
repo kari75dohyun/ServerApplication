@@ -35,13 +35,15 @@ public:
     void send_secure_proto(const google::protobuf::MessageLite& msg);
 
     // JSON만 body로 보내고 싶을 때 (자동 4바이트 프리픽스)
-    void send_json(const nlohmann::json& j);
+    //void send_json(const nlohmann::json& j);
+    void send_json(nlohmann::json j);
 
     // 이미 만들어 둔 바디(예: "secret + json")를 4바이트 프리픽스로 감싸 전송
     void send_framed(const std::string& body);
 
     // secret 프리픽스 + JSON을 함께 보내야 하는 패킷용 (login/keepalive)
-    void send_secure_json(const nlohmann::json& j);
+    //void send_secure_json(const nlohmann::json& j)
+    void send_secure_json(nlohmann::json j);
 
     void set_heartbeat_interval(int seconds) { heartbeat_sec_ = seconds; }
 
@@ -54,6 +56,18 @@ public:
     // 실패 시 false 로 설정 -> 인증되지 않은 상태로 간주
     // authed_ 는 atomic<bool> 이므로 멀티스레드 환경에서도 안전하게 접근 가능
     void mark_authed(bool v) { authed_.store(v); }
+
+    //std::atomic<int> timeout_count_{ 0 };
+
+    void on_request_timeout() {
+        timeout_count_.fetch_add(1, std::memory_order_relaxed);
+        //AppContext::instance().logger->warn("[DBMW] Request timeout detected!");
+    }
+
+    int get_timeout_count() const {
+        return timeout_count_.load(std::memory_order_relaxed);
+    }
+
 
 private:
     void do_connect();
@@ -98,4 +112,12 @@ private:
 
     OnMessageFn on_message_;
     OnProtoFn on_message_pb_;
+
+    // 요청 타임아웃 관리
+    //static std::atomic<int> timeout_count_;
+    //std::atomic<int> timeout_count_{ 0 };
+    std::atomic<int> timeout_count_;
+    std::unordered_map<std::string, std::shared_ptr<boost::asio::steady_timer>> request_timers_;
+    std::mutex request_timers_mutex_;
+    std::string generate_request_id();
 };
