@@ -51,7 +51,7 @@ private:
 
     std::shared_ptr<SessionPool> session_pool_;  // 세션 풀 멤버 추가  
 
-    std::unordered_map<std::string, std::weak_ptr<Session>> nickname_to_session_;  // 닉네임→세션
+    std::unordered_map<std::string, std::weak_ptr<Session>> nickname_to_session_;  // 닉네임 -> 세션
     std::mutex nickname_mutex_; // 닉네임 맵 보호용
 
     // 글로벌 keepalive 관련
@@ -108,7 +108,10 @@ public:
     void remove_session(int session_id);
 
     // 브로드캐스트 메시지 전송
-    void broadcast(const std::string& msg, int sender_session_id, std::shared_ptr<Session> session);
+    void broadcast(const std::string& msg, int sender_session_id, std::shared_ptr<Session>);
+
+    // 같은 존에게만 TCP 브로드캐스트
+    void broadcast_zone_tcp(const std::string & msg, int zone_id, int sender_session_id, std::shared_ptr<Session>);
 
     // UDP 메시지 수신 처리
     void on_udp_receive(const std::string& msg, const boost::asio::ip::udp::endpoint& from,

@@ -87,7 +87,7 @@ void DBmwRouter::handle(const wire::Envelope& env) {
         // JSON 버전과 동일한 처리
         if (ack.result() == "ok") {
             AppContext::instance().logger->info("[DBMW][PB] server_login_ack OK (nickname={})", ack.nickname());
-            // 로그인 성공 → 인증 플래그 켜기
+            // 로그인 성공 -> 인증 플래그 켜기
             if (auto cli = AppContext::instance().db_client.lock()) {
                 cli->mark_authed(true);
             }
@@ -98,7 +98,7 @@ void DBmwRouter::handle(const wire::Envelope& env) {
         break;
     }
     case T::KEEPALIVE_ACK: {
-        // 하트비트 응답 → 미스 카운터 리셋
+        // 하트비트 응답 -> 미스 카운터 리셋
         if (auto cli = AppContext::instance().db_client.lock()) {
             cli->note_heartbeat_ack();
         }
@@ -271,6 +271,15 @@ void DBmwRouter::send_now_locked(const std::string& req_id) {
     }
     catch (const std::exception& e) {
         AppContext::instance().logger->error("[DBMW][TX] exception: {}", e.what());
+
+        // 단순 재시도 (0.5초 후)
+        try {
+            schedule_retry(req_id, std::chrono::milliseconds(500));
+            AppContext::instance().logger->warn("[DBMW][TX] retry scheduled for req_id={}", req_id);
+        }
+        catch (const std::exception& re) {
+            AppContext::instance().logger->error("[DBMW][TX] retry scheduling failed for req_id={}, reason={}", req_id, re.what());
+        }
     }
 }
 
@@ -524,9 +533,39 @@ void DBmwRouter::schedule_next_metrics(std::chrono::seconds interval) {
         }
         catch (const std::exception& e) {
             AppContext::instance().logger->error("[DBmwRouter] log_metrics timer error: {}", e.what());
+
+            // 예외가 발생해도 다음 주기를 반드시 이어감
+            try {
+                schedule_next_metrics(interval);
+            }
+            catch (const std::exception& re) {
+                AppContext::instance().logger->critical(
+                    "[DBmwRouter] schedule_next_metrics 재시도 실패: {}", re.what());
+            }
+            return;
         }
+
 
         // 다음 주기 예약
         schedule_next_metrics(interval);
+        });
+}
+
+void DBmwRouter::schedule_retry(const std::string& req_id, std::chrono::milliseconds delay)
+{
+    auto it = pending_.find(req_id);
+    if (it == pending_.end()) return;
+    auto self = shared_from_this();
+
+    // 비동기 타이머를 생성하여 일정 시간 후 다시 send_now_locked() 호출
+    auto timer = std::make_shared<boost::asio::steady_timer>(io_, delay);
+    timer->async_wait([this, self, req_id, timer](const boost::system::error_code& ec) {
+        if (!ec) {
+            AppContext::instance().logger->info("[DBMW][TX] Retrying pending request: {}", req_id);
+            send_now_locked(req_id);
+        }
+        else {
+            AppContext::instance().logger->warn("[DBMW][TX] Retry cancelled for req_id={} ({})", req_id, ec.message());
+        }
         });
 }

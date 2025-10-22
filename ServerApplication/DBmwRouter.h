@@ -109,6 +109,8 @@ private:
     void arm_timeout_locked(const std::string& req_id);
     void fulfill_and_erase_locked(const std::string& req_id, const json& result, bool success);
 
+    void schedule_retry(const std::string& req_id, std::chrono::milliseconds delay);
+
 private:
     // 실행 컨텍스트
     boost::asio::io_context& io_;

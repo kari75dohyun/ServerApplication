@@ -84,6 +84,14 @@ void UDPManager::start_receive() {
                     }
                     catch (const std::exception& e) {
                         AppContext::instance().logger->error("[UDPManager] on_udp_receive 예외 발생: {}", e.what());
+                        try {
+                            // 예외가 나더라도 반드시 다음 수신을 이어감
+                            start_receive();
+                        }
+                        catch (const std::exception& re) {
+                            AppContext::instance().logger->critical("[UDPManager] start_receive() 재시작 실패: {}", re.what());
+                        }
+                        return;
                     }
                 }
             }

@@ -1,6 +1,7 @@
 ﻿#include "../MessageHandlers/ChatHandler.h"
 #include "../Session.h"
 #include "../DataHandler.h"
+#include "../AppContext.h"
 #include "../Logger.h"
 #include "../Utility.h"
 
@@ -20,6 +21,12 @@ void chat_handler(std::shared_ptr<Session> session,
     // 전체에 브로드캐스트 (자신 제외, handler 필요)
     if (handler) {
         handler->broadcast(send_msg.dump() + "\n", session->get_session_id(), session);
+    }
+    else {
+            AppContext::instance().logger->warn(
+            "[CHAT_HANDLER] DataHandler 포인터 없음. session_id={}",
+            session->get_session_id()
+				);
     }
 
     // 송신자에게는 완료 메시지(또는 echo)

@@ -5,7 +5,7 @@
 
 void init_logger() {
     if (!AppContext::instance().logger) {
-        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>("server.log", false);
+        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>("Server.log", false);
 
         //콘솔창에 로그 찍고 싶으면 아래 주석 풀기
         //auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();

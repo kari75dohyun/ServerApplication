@@ -129,6 +129,9 @@
     <ClCompile Include="generated\wire.pb.cc">
       <Filter>소스 파일\generated</Filter>
     </ClCompile>
+    <ClCompile Include="ChatZoneHandler.cpp">
+      <Filter>소스 파일\MessageHandlers</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Server.h">
@@ -211,6 +214,9 @@
     </ClInclude>
     <ClInclude Include="generated\wire.pb.h">
       <Filter>헤더 파일\generated</Filter>
+    </ClInclude>
+    <ClInclude Include="MessageHandlers\ChatZoneHandler.h">
+      <Filter>헤더 파일\MessageHandlers</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

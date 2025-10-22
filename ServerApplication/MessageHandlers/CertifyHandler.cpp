@@ -14,7 +14,7 @@ void login_handler(std::shared_ptr<Session> session, const nlohmann::json& msg,
     DataHandler* handler, SessionManager* session_manager)
 {
     std::string nickname = msg.value("nickname", "anonymity");
-
+    AppContext::instance().logger->info("[DEBUG] login_handler called: session_id={}", session->get_session_id());
     if (nickname.empty()) {
         session->post_write(R"({"type":"error","msg":"nickname required"})");
         return;

@@ -65,7 +65,10 @@ private:
 
     // 글로벌 keepalive 관련 => 클라 heartbeat 구조로 변경
     std::atomic<std::chrono::steady_clock::time_point> last_alive_time_{};
-    SessionState state_ = SessionState::Handshaking;                 // 초기값 Handshaking
+
+	// 세션 상태
+	std::atomic<SessionState> state_{ SessionState::Handshaking };   // 초기값 Handshakings
+
 	// UDP 엔드포인트
     std::optional<boost::asio::ip::udp::endpoint> udp_endpoint_;
     std::chrono::steady_clock::time_point udp_ep_update_time_{};
@@ -80,7 +83,21 @@ private:
     int zone_id_ = 0; // 기본 0 = 미배정
 
     std::atomic<uint64_t> generation_{ 0 };   // generation: reset시 증가
-    std::atomic<bool> active_{ false };   // 활성 세션 여부
+    //std::atomic<bool> active_{ false };   // 활성 세션 여부
+    //std::function<void(std::shared_ptr<Session>)> release_callback_;
+    //std::atomic<bool> released_{ false };
+
+    // Lifecycle 관리용 
+    enum class LifeState : uint8_t {
+        Idle = 0,     // 풀에서 대기 중
+        Active,       // 사용 중 (acquire 후)
+        Closing,      // close_session() 실행 중
+        Closed,       // 완전 종료됨
+        Released      // 풀로 반환됨
+    };
+    
+    std::atomic<uint8_t> life_state_{ static_cast<uint8_t>(LifeState::Idle) };
+    std::function<void(std::shared_ptr<Session>)> release_callback_;
 
     // UDP Flood 방지 관련
     // Token Bucket용 멤버
@@ -90,9 +107,6 @@ private:
     std::chrono::steady_clock::time_point lastUdpTokenRefill_ = std::chrono::steady_clock::now();
     
     std::weak_ptr<Zone> zone_;  
-
-    std::function<void(std::shared_ptr<Session>)> release_callback_;
-    std::atomic<bool> released_{ false };
 
     std::chrono::steady_clock::time_point udp_token_issued_{};
     int udp_token_ttl_sec_ = 300; // 기본 5분(설정값으로 바꿀 수 있게)
@@ -231,8 +245,22 @@ public:
     uint64_t get_generation() const { return generation_.load(); }
     void increment_generation() { ++generation_; }
 	// 활성 세션 여부 설정 및 조회
-    void set_active(bool v) { active_ = v; }
-    bool is_active() const { return active_.load(); }
+    //void set_active(bool v) { active_ = v; }
+    //bool is_active() const { return active_.load(); }
+    //bool is_released() const { return released_.load(); }
+    //void mark_released() { released_.exchange(true); }
+    // 
+    // 수명주기 API
+    bool try_activate();   // Idle -> Active
+    bool try_close();      // Active -> Closing
+    void finalize_close(); // Closing -> Closed
+    void mark_released();  // Released 표시
+    LifeState get_life_state() const;
+    // (호환용) set_active / is_active 유지
+    void set_active(bool v);
+    bool is_active() const;
+
+    bool is_released() const { return get_life_state() == LifeState::Released; }
 
     boost::asio::steady_timer retry_timer_;  // 재시도 타이머
     void close_session();
@@ -245,9 +273,6 @@ public:
     void set_release_callback(std::function<void(std::shared_ptr<Session>)> cb) {
         release_callback_ = std::move(cb);
     }
-
-    bool is_released() const { return released_.load(); }
-    void mark_released() { released_.exchange(true); }
 
     void cleanup();
 

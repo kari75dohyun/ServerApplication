@@ -11,6 +11,7 @@
 using json = nlohmann::json;
 
 void LoginFlow::begin(std::shared_ptr<Session> sess, const std::string& nickname) {
+    AppContext::instance().logger->info("[DEBUG] LoginFlow::begin() called nickname={}", nickname);
     auto flow = std::shared_ptr<LoginFlow>(new LoginFlow(sess, nickname));
     flow->request_user_info();
 }
@@ -19,35 +20,78 @@ LoginFlow::LoginFlow(std::shared_ptr<Session> s, std::string n)
     : sess_(s), nickname_(std::move(n)) {
 }
 
+//on_user_info_fail(json{ {"type","error"},{"msg","db_router_unavailable"} });
+
 void LoginFlow::request_user_info() {
     auto router = AppContext::instance().db_router.lock();
-    if (!router) {
-        on_user_info_fail(json{ {"type","error"},{"msg","db_router_unavailable"} });
-        return;
-    }
-
     auto s = sess_.lock();
     if (!s) return;
 
-    auto self = shared_from_this();
-    router->send_request_cb(
-        "request_user_info",
-        json{ {"nickname", nickname_} },
-        /*secure*/ true,
-        /*timeout_ms*/ 2500,
-        /*max_retries*/ 2,
-        /*session_id*/ s->get_session_id(),
-        // on_ok
-        [self](const json& j) { self->on_user_info_ok(j); },
-        // on_error
-        [self](const json& j) {
-            self->on_user_info_fail(j.value("msg", "timeout"));
-        }
-    );
+    // 1. DB 라우터 객체 자체가 없는 경우
+    if (!router) {
+        AppContext::instance().logger->error("[DEBUG] db_router is null!");
+        AppContext::instance().logger->info("[DEBUG] on_user_info_ok() bypass login for {}", nickname_);
 
-    // 필요하면 “조회 중” 안내
-    // s->post_write(R"({"type":"notice","msg":"checking account..."})");
+        //on_user_info_fail(json{ {"type","error"},{"msg","db_router_unavailable"} });
+
+        on_user_info_ok(nlohmann::json{
+            {"type","db_query_result"},
+            {"api","request_user_info"},
+            {"code",0},
+            {"data", { {"nickname", nickname_} }}
+            });
+        return;
+    }
+
+    // 2. DB 라우터는 있지만, DB 미들웨어 연결이 안 되어 있는 경우
+    bool db_connected = false;
+    if (auto db = AppContext::instance().db_client.lock()) {
+        db_connected = db->is_connected();
+    }
+
+    if (!db_connected) {
+        AppContext::instance().logger->warn(
+            "[DEBUG] DB middleware not connected! bypassing login for {}", nickname_);
+
+        //on_user_info_fail(json{ {"type","error"},{"msg","db_router_unavailable"} });
+
+        on_user_info_ok(nlohmann::json{
+            {"type","db_query_result"},
+            {"api","request_user_info"},
+            {"code",0},
+            {"data", { {"nickname", nickname_} }}
+            });
+        return;
+    }
+
+    // 3. DB 연결이 정상인 경우 -> 실제 요청 전송
+    try {
+        AppContext::instance().logger->info(
+            "[DEBUG] request_user_info() start for {}", nickname_);
+
+        auto self = shared_from_this();
+        router->send_request_cb(
+            "request_user_info",
+            nlohmann::json{ {"nickname", nickname_} },
+            /*secure*/ true,
+            /*timeout_ms*/ 2500,
+            /*max_retries*/ 2,
+            /*session_id*/ s->get_session_id(),
+            // on_ok
+            [self](const nlohmann::json& j) { self->on_user_info_ok(j); },
+            // on_error
+            [self](const nlohmann::json& j) {
+                self->on_user_info_fail(j.value("msg", "timeout"));
+            }
+        );
+    }
+    catch (const std::exception& e) {
+        AppContext::instance().logger->error(
+            "[LoginFlow] request_user_info exception: {}", e.what());
+        on_user_info_fail(nlohmann::json{ {"type","error"}, {"msg","exception"} });
+    }
 }
+
 
 void LoginFlow::on_user_info_ok(const json& j) {
     // 기대 스키마: {"type":"db_query_result","api":"request_user_info","code":0,"data":{...},"req_id":"..."}
@@ -67,6 +111,10 @@ void LoginFlow::on_user_info_ok(const json& j) {
     auto sm = AppContext::instance().session_manager.lock();
     auto dh = AppContext::instance().data_handler.lock();
     if (!sm || !dh) { complete_fail("server_unavailable"); return; }
+
+    AppContext::instance().logger->info("[DEBUG] SessionManager LoginFlow: {}", (void*)sm.get());
+    // 세션을 SessionManager에 등록
+    sm->add_session(s);
 
     // 중복 로그인 축출
     if (auto prev = sm->find_session_by_nickname(nickname_)) {

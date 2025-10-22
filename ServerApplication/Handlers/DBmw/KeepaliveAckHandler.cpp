@@ -11,7 +11,7 @@ static void OnServerKeepAliveAck(DBmwRouter& /*router*/, const nlohmann::json& /
     }
 
     // (원하면 로그도 추가 가능)
-    AppContext::instance().logger->info("[DBMW][RX] keepalive_ack 수신 → heartbeat OK");
+    AppContext::instance().logger->info("[DBMW][RX] keepalive_ack 수신 -> heartbeat OK");
 }
 
 // "keepalive_ack" 타입에 이 핸들러 등록

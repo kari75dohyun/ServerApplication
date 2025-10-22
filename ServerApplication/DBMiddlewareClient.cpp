@@ -32,7 +32,6 @@ DBMiddlewareClient::DBMiddlewareClient(boost::asio::io_context& io,
     timeout_count_(0) {
 }
 
-
 void DBMiddlewareClient::start() {
     stopping_.store(false);
     boost::asio::dispatch(strand_, [self = shared_from_this()] {
@@ -141,7 +140,9 @@ void DBMiddlewareClient::do_read_some() {
                     const std::string& raw = *opt;
 
                     // 1. secret 접두어 제거
-                    std::string_view view(raw);
+                    //std::string_view view(raw);
+                    std::string raw_copy = *opt;
+                    std::string_view view(raw_copy);
                     if (view.size() >= secret_.size() && memcmp(view.data(), secret_.data(), secret_.size()) == 0) {
                         view.remove_prefix(secret_.size());
                     }
@@ -163,9 +164,12 @@ void DBMiddlewareClient::do_read_some() {
                             on_message_(j);
                         }
                     }
+                    catch (const nlohmann::json::parse_error& e) {
+                        AppContext::instance().logger->warn("[DBMW] JSON parse error: {}", e.what());
+                    }
                     catch (const std::exception& e) {
-                        AppContext::instance().logger->warn(
-                            "[DBMW] json parse error: {}", e.what());
+                        AppContext::instance().logger->error("[DBMW] Unexpected exception while parsing JSON: {}", e.what());
+                        send_admin_alert("[ALERT][DBMW] Unexpected JSON exception: " + std::string(e.what()));
                     }
                 }
 
@@ -264,40 +268,117 @@ std::string DBMiddlewareClient::generate_request_id() {
 
 //  JSON만 body로 -> 프레이밍 후 전송
 void DBMiddlewareClient::send_json(nlohmann::json j) {
-    // 1) 요청 ID 붙이기 (없으면 생성)
-    std::string req_id;
-    if (j.contains("request_id")) {
-        req_id = j["request_id"].get<std::string>();
-    }
-    else {
-        req_id = generate_request_id(); // UUID나 증가 카운터
-        j["request_id"] = req_id;
-    }
-
-    auto payload = j.dump();
-    send_framed(payload);   // 기존 전송
-
-	// 2) 타이머 생성 (5초)
-    auto timer = std::make_shared<boost::asio::steady_timer>(strand_);
-    timer->expires_after(std::chrono::seconds(5));
-    {
-        std::lock_guard<std::mutex> lock(request_timers_mutex_);
-        request_timers_[req_id] = timer;
-    }
-
-    // 3) 타임아웃 핸들러
-    auto self = shared_from_this();
-    timer->async_wait([this, self, req_id, timer](const boost::system::error_code& ec) {
-        if (!ec) {
-            timeout_count_.fetch_add(1, std::memory_order_relaxed);
-            AppContext::instance().logger->warn("[DBMW] Request timeout detected! id={}", req_id);
-            // 여기서 세션 끊거나 alert 전송 가능
+    try {
+        // 1. request_id 보장
+        std::string req_id;
+        if (j.contains("request_id"))
+            req_id = j["request_id"].get<std::string>();
+        else {
+            req_id = generate_request_id();
+            j["request_id"] = req_id;
         }
-        // 완료된 timer는 map에서 제거
-        std::lock_guard<std::mutex> lock(request_timers_mutex_);
-        request_timers_.erase(req_id);
-        });
+
+        auto payload = j.dump();
+
+        // 2. 프레임 전송
+        try {
+            send_framed(payload);
+        }
+        catch (const boost::system::system_error& e) {
+            using namespace boost::asio::error;
+            if (e.code() == operation_aborted) {
+                AppContext::instance().logger->info("[DBMW][send_framed] operation aborted (normal close)");
+            }
+            else if (e.code() == broken_pipe || e.code() == connection_reset) {
+                AppContext::instance().logger->warn("[DBMW][send_framed] connection lost: {}", e.what());
+            }
+            else {
+                AppContext::instance().logger->error("[DBMW][send_framed] SystemError: {} (code={})", e.what(), e.code().value());
+                send_admin_alert("[ALERT][DBMW][send_json] send_framed() system_error: " + std::string(e.what()));
+            }
+
+            close_socket();
+            schedule_reconnect();
+            return;
+        }
+        catch (const std::bad_alloc& e) {
+            AppContext::instance().logger->critical("[DBMW][send_framed] Memory allocation failure: {}", e.what());
+            send_admin_alert("[ALERT][DBMW][send_json] Memory allocation failure in send_framed()");
+            close_socket();
+            schedule_reconnect();
+            return;
+        }
+        catch (const std::exception& e) {
+            AppContext::instance().logger->error("[DBMW][send_framed] Exception: {}", e.what());
+            send_admin_alert("[ALERT][DBMW][send_json] Unexpected exception in send_framed(): " + std::string(e.what()));
+            close_socket();
+            schedule_reconnect();
+            return;
+        }
+        catch (...) {
+            AppContext::instance().logger->critical("[DBMW][send_framed] Unknown fatal exception!");
+            send_admin_alert("[ALERT][DBMW][send_json] Unknown fatal exception in send_framed()");
+            close_socket();
+            schedule_reconnect();
+            return;
+        }
+
+        // 3. 타임아웃 타이머 등록
+        auto timer = std::make_shared<boost::asio::steady_timer>(strand_);
+        timer->expires_after(std::chrono::seconds(5));
+        {
+            std::lock_guard<std::mutex> lock(request_timers_mutex_);
+            request_timers_[req_id] = timer;
+        }
+
+        // 4. 타임아웃 콜백
+        auto self = shared_from_this();
+        timer->async_wait([this, self, req_id, timer](const boost::system::error_code& ec) {
+            try {
+                if (!ec) {
+                    timeout_count_.fetch_add(1, std::memory_order_relaxed);
+                    AppContext::instance().logger->warn("[DBMW] Request timeout detected! id={}", req_id);
+                    send_admin_alert("[ALERT][DBMW] Request timeout detected (id=" + req_id + ")");
+                }
+
+                std::lock_guard<std::mutex> lock(request_timers_mutex_);
+                request_timers_.erase(req_id);
+            }
+            catch (const std::exception& e) {
+                AppContext::instance().logger->error("[DBMW][timer] Exception: {}", e.what());
+            }
+            catch (...) {
+                AppContext::instance().logger->critical("[DBMW][timer] Unknown fatal exception!");
+            }
+            });
+    }
+    catch (const boost::system::system_error& e) {
+        AppContext::instance().logger->error("[DBMW][send_json] System error: {}", e.what());
+        send_admin_alert("[ALERT][DBMW][send_json] System error: " + std::string(e.what()));
+        close_socket();
+        schedule_reconnect();
+    }
+    catch (const std::bad_alloc& e) {
+        AppContext::instance().logger->critical("[DBMW][send_json] Memory allocation failure: {}", e.what());
+        send_admin_alert("[ALERT][DBMW][send_json] Memory allocation failure!");
+        close_socket();
+        schedule_reconnect();
+    }
+    catch (const std::exception& e) {
+        AppContext::instance().logger->error("[DBMW][send_json] Unexpected exception: {}", e.what());
+        send_admin_alert("[ALERT][DBMW][send_json] Unexpected exception: " + std::string(e.what()));
+        close_socket();
+        schedule_reconnect();
+    }
+    catch (...) {
+        AppContext::instance().logger->critical("[DBMW][send_json] Unknown fatal exception!");
+        send_admin_alert("[ALERT][DBMW][send_json] Unknown fatal exception!");
+        close_socket();
+        schedule_reconnect();
+    }
 }
+
+
 
 // secret + JSON -> 프레이밍 후 전송 (login/keepalive 전용)
 void DBMiddlewareClient::send_secure_json(nlohmann::json j) {

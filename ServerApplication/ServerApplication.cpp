@@ -87,37 +87,96 @@ int main() {
         AppContext::instance().logger->info("Echo Server started on port 12345");
 
         // 4. DBMiddlewareClient 초기화/연결
+        //auto router = std::make_shared<DBmwRouter>(io, session_manager, data_handler);
+        //DBmwHandlerRegistry::instance().attach(*router);
+
+        //auto db_client = std::make_shared<DBMiddlewareClient>(
+        //    io,
+        //    AppContext::instance().config.value("dbmw_host", std::string("127.0.0.1")),
+        //    static_cast<uint16_t>(AppContext::instance().config.value("dbmw_port", 40001)),
+        //    [router](const nlohmann::json& j) { router->handle(j); },
+        //    AppContext::instance().config.value("dbmw_login_nickname", std::string("Server_1")),
+        //    secret //이미 읽어둔 값 재사용
+        //);
+
+        //// PB 수신 -> 라우터
+        //db_client->set_on_message_pb([router](const wire::Envelope& env) {
+        //    router->handle(env);
+        //    });
+
+        //// 여기서 주입
+        //AppContext::instance().session_manager = session_manager;
+        //AppContext::instance().data_handler = data_handler;
+        //AppContext::instance().db_router = router;
+        //AppContext::instance().db_client = db_client;
+
+        //std::weak_ptr<DBMiddlewareClient> weak_db = db_client;
+        //router->set_senders(
+        //    [weak_db](const nlohmann::json& j) { if (auto db = weak_db.lock()) db->send_json(j); },
+        //    [weak_db](const nlohmann::json& j) { if (auto db = weak_db.lock()) db->send_secure_json(j); }
+        //);
+
+        //db_client->set_heartbeat_interval(AppContext::instance().config.value("dbmw_heartbeat_sec", 20));
+        //db_client->start();
+
+        // 4. DBMiddlewareClient 초기화/연결 (AppContext가 직접 router를 보유하도록 수정)
+        //AppContext::instance().db_router = std::make_shared<DBmwRouter>(io, session_manager, data_handler);
+        //auto router = AppContext::instance().db_router.lock();
+        //DBmwHandlerRegistry::instance().attach(*router);
+
         auto router = std::make_shared<DBmwRouter>(io, session_manager, data_handler);
+        AppContext::instance().db_router = router;  // weak_ptr 유지용
+
         DBmwHandlerRegistry::instance().attach(*router);
+        AppContext::instance().logger->info("[MAIN] DBmwRouter created at {}", (void*)router.get());
 
+        if (!router) {
+            AppContext::instance().logger->critical("[MAIN] Failed to initialize DBmwRouter!");
+            return 1;
+        }
+
+        DBmwHandlerRegistry::instance().attach(*router);
+        
         auto db_client = std::make_shared<DBMiddlewareClient>(
-            io,
-            AppContext::instance().config.value("dbmw_host", std::string("127.0.0.1")),
-            static_cast<uint16_t>(AppContext::instance().config.value("dbmw_port", 40001)),
-            [router](const nlohmann::json& j) { router->handle(j); },
-            AppContext::instance().config.value("dbmw_login_nickname", std::string("Server_1")),
-            secret //이미 읽어둔 값 재사용
-        );
+                io,
+                AppContext::instance().config.value("dbmw_host", std::string("127.0.0.1")),
+                static_cast<uint16_t>(AppContext::instance().config.value("dbmw_port", 40001)),
+                [router](const nlohmann::json& j) { router->handle(j); },
+                AppContext::instance().config.value("dbmw_login_nickname", std::string("Server_1")),
+                secret // 이미 읽어둔 값 재사용
+                );
 
-        // PB 수신 -> 라우터
         db_client->set_on_message_pb([router](const wire::Envelope& env) {
-            router->handle(env);
-            });
-
-        // 여기서 주입
+        router->handle(env);
+        });
+        // AppContext 전역에 등록
         AppContext::instance().session_manager = session_manager;
         AppContext::instance().data_handler = data_handler;
-        AppContext::instance().db_router = router;
         AppContext::instance().db_client = db_client;
 
+        // sender 주입
         std::weak_ptr<DBMiddlewareClient> weak_db = db_client;
         router->set_senders(
-            [weak_db](const nlohmann::json& j) { if (auto db = weak_db.lock()) db->send_json(j); },
-            [weak_db](const nlohmann::json& j) { if (auto db = weak_db.lock()) db->send_secure_json(j); }
-        );
-
+        [weak_db](const nlohmann::json& j) {
+        if (auto db = weak_db.lock()) {
+            AppContext::instance().logger->info("[DBMW][Router] send_json called: {}", j.dump());
+            db->send_json(j);
+         }
+        },
+        [weak_db](const nlohmann::json& j) {
+        if (auto db = weak_db.lock()) {
+            AppContext::instance().logger->info("[DBMW][Router] send_secure_json called: {}", j.dump());
+            db->send_secure_json(j);
+           }
+        });
+        // 디버그 로그
+        AppContext::instance().logger->info("[MAIN] DBmwRouter initialized successfully: {}", (void*)router.get());
+        // DBMiddleware 연결 시작
         db_client->set_heartbeat_interval(AppContext::instance().config.value("dbmw_heartbeat_sec", 20));
         db_client->start();
+        AppContext::instance().logger->info("[MAIN] DBMiddlewareClient connection started to {}:{}",
+        AppContext::instance().config.value("dbmw_host", std::string("127.0.0.1")),
+        AppContext::instance().config.value("dbmw_port", 40001));
 
         // 5. 시그널 핸들링 (Ctrl+C 안전 종료)
         boost::asio::signal_set signals(io, SIGINT, SIGTERM);

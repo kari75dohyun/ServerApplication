@@ -14,24 +14,58 @@ void SessionManager::add_session(std::shared_ptr<Session> session) {
     int session_id = session->get_session_id();
     int shard = get_shard(session_id);
 
+    AppContext::instance().logger->info(
+        "[DEBUG][add_session] called: id={} gen={} shard={} ptr={}",
+        session_id,
+        session->get_generation(),
+        shard,
+        (void*)session.get());
+
     std::shared_ptr<Session> replaced_session;
-    {
+
+    try {
         std::lock_guard<std::mutex> lock(session_mutexes_[shard]);
         auto& bucket = session_buckets_[shard];
+
         auto it = bucket.find(session_id);
         if (it != bucket.end()) {
-            replaced_session = it->second;  // 기존 세션 저장
-            bucket.erase(it);
+            auto prev = it->second;
+            if (prev && prev->get_generation() != session->get_generation()) {
+                replaced_session = prev;
+                AppContext::instance().logger->warn(
+                    "[SessionManager] Replacing old session_id={} (generation {} -> {})",
+                    session_id, prev->get_generation(), session->get_generation());
+            }
         }
-        bucket[session_id] = session; // 새 세션 등록
+
+        bucket[session_id] = session;
+
+        AppContext::instance().logger->info(
+            "[DEBUG][add_session] bucket[{}] size after insert = {}",
+            shard, bucket.size());
+    }
+    catch (const std::out_of_range& e) {
+        AppContext::instance().logger->error(
+            "[DEBUG][add_session] out_of_range: shard={} what={}", shard, e.what());
+    }
+    catch (const std::exception& e) {
+        AppContext::instance().logger->error(
+            "[DEBUG][add_session] exception: {}", e.what());
+    }
+    catch (...) {
+        AppContext::instance().logger->error(
+            "[DEBUG][add_session] unknown exception occurred!");
     }
 
-    // 락을 벗어난 뒤에 안전하게 자원 정리
     if (replaced_session && !replaced_session->is_closed()) {
+        AppContext::instance().logger->warn(
+            "[DEBUG][add_session] replaced_session detected id={} (old gen={})",
+            replaced_session->get_session_id(),
+            replaced_session->get_generation());
         replaced_session->close_session();
-        // 필요하면 세션 풀에도 반환 (DataHandler가 호출한 쪽에서 처리하는 게 깔끔)
     }
 }
+
 
 std::shared_ptr<Session> SessionManager::remove_session(int session_id) {
     int shard = get_shard(session_id);

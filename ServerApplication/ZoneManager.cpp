@@ -41,10 +41,10 @@ void ZoneManager::remove_session(const std::shared_ptr<Session>& sess) {
             zone->remove_session(sess);
 			sess->set_zone_id(-1);  // 세션의 zone_id 초기화
 			sess->clear_zone(); // 세션의 zone 정보 초기화
-            AppContext::instance().logger->info("[ZONE] 세션 {} → ZONE {}에서 제거됨", sess->get_session_id(), zone_id);
+            AppContext::instance().logger->info("[ZONE] 세션 {} -> ZONE {}에서 제거됨", sess->get_session_id(), zone_id);
         }
         else {
-            AppContext::instance().logger->warn("[ZONE] 세션 {} → ZONE {} 제거 실패 (존 없음)", sess->get_session_id(), zone_id);
+            AppContext::instance().logger->warn("[ZONE] 세션 {} -> ZONE {} 제거 실패 (존 없음)", sess->get_session_id(), zone_id);
         }
 	}
 }

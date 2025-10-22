@@ -21,6 +21,11 @@ public:
     void dispatch_udp(std::shared_ptr<Session> session, const std::string& raw_msg,
         const boost::asio::ip::udp::endpoint& from, boost::asio::ip::udp::socket& udp_socket);
 
+    void dispatch_udp_parsed(std::shared_ptr<Session> session,
+        const nlohmann::json & parsed_msg,
+        const boost::asio::ip::udp::endpoint & from,
+        boost::asio::ip::udp::socket & udp_socket);
+
     void register_handler(const std::string& type, HandlerFunc handler);
     void register_udp_handler(const std::string& type, UdpHandlerFunc handler);
 

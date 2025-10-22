@@ -76,8 +76,8 @@ private:
     void flush_write_queue();
     void close_socket();
 
-    void server_send_login();          // 접속 직후 로그인 (secret + json → framed)
-    void arm_heartbeat_timer(); // 주기 keepalive (secret + json → framed)
+    void server_send_login();          // 접속 직후 로그인 (secret + json -> framed)
+    void arm_heartbeat_timer(); // 주기 keepalive (secret + json -> framed)
 
 private:
     boost::asio::ip::tcp::socket socket_;
