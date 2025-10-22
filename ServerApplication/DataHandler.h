@@ -51,7 +51,7 @@ private:
 
     std::shared_ptr<SessionPool> session_pool_;  // 세션 풀 멤버 추가  
 
-    std::unordered_map<std::string, std::weak_ptr<Session>> nickname_to_session_;  // 닉네임→세션
+    std::unordered_map<std::string, std::weak_ptr<Session>> nickname_to_session_;  // 닉네임 -> 세션
     std::mutex nickname_mutex_; // 닉네임 맵 보호용
 
     // 글로벌 keepalive 관련

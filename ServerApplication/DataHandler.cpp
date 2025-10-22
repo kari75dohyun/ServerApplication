@@ -338,7 +338,7 @@ void DataHandler::on_udp_receive(const std::string& msg,
     auto prev_ep_snapshot = session->get_udp_endpoint(); // 락 밖 스냅샷
     if (!prev_ep_snapshot || *prev_ep_snapshot != from) {
         AppContext::instance().logger->info(
-            "[UDP] endpoint 변경 감지! 이전: {}:{} → 신규: {}:{}",
+            "[UDP] endpoint 변경 감지! 이전: {}:{} -> 신규: {}:{}",
             prev_ep_snapshot ? prev_ep_snapshot->address().to_string() : "N/A",
             prev_ep_snapshot ? prev_ep_snapshot->port() : 0,
             from.address().to_string(),
@@ -360,7 +360,7 @@ void DataHandler::on_udp_receive(const std::string& msg,
                         // else: 이미 다른 세션으로 바뀌었으면 건드리지 않음
                     }
                     else {
-                        // weak_ptr 만료 → 정리
+                        // weak_ptr 만료 -> 정리
                         udp_endpoint_to_session_.erase(it);
                     }
                 }
@@ -455,17 +455,17 @@ void DataHandler::udp_broadcast_zone(int zone_id, const std::string& msg, boost:
 void DataHandler::assign_session_to_zone(std::shared_ptr<Session> session, int zone_id) {
     auto zone = zone_manager_.get_zone(zone_id);
     if (!zone) {
-        AppContext::instance().logger->warn("[ZONE] 세션 {} → ZONE {} 배정 실패 (존 없음)", session->get_session_id(), zone_id);
+        AppContext::instance().logger->warn("[ZONE] 세션 {} -> ZONE {} 배정 실패 (존 없음)", session->get_session_id(), zone_id);
         return; // 존이 없으면 바로 리턴
 	}
 
     if (zone->add_session(session)) {
         session->set_zone_id(zone_id);
 		session->set_zone(zone); // 세션에 존 정보 설정
-        AppContext::instance().logger->info("[ZONE] 세션 {} → ZONE {} 배정", session->get_session_id(), zone_id);
+        AppContext::instance().logger->info("[ZONE] 세션 {} -> ZONE {} 배정", session->get_session_id(), zone_id);
     }
     else {
-        AppContext::instance().logger->warn("[ZONE] 세션 {} → ZONE {} add_session 실패 (존 인원수/중복 체크)", session->get_session_id(), zone_id);
+        AppContext::instance().logger->warn("[ZONE] 세션 {} -> ZONE {} add_session 실패 (존 인원수/중복 체크)", session->get_session_id(), zone_id);
     }
 }
 

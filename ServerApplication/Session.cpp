@@ -27,6 +27,7 @@ Session::Session(tcp::socket socket, int session_id, weak_ptr<DataHandler> data_
     memset(data_, 0, sizeof(data_));
     // 글로벌 구조에서는 세션 생성시점에 마지막 pong 시간 초기화!
     last_alive_time_ = std::chrono::steady_clock::now();
+    life_state_.store(static_cast<uint8_t>(LifeState::Idle), std::memory_order_release);
 }
 
 Session::~Session() {
@@ -90,7 +91,7 @@ void Session::run_next_task() {
     fn();  // 비동기 작업 진입, 콜백 마지막에 run_next_task() 호출!
 }
 
-// (1) post_write(기존 string용 → shared_ptr 버전으로 변환해서 호출)
+// (1) post_write(기존 string용 -> shared_ptr 버전으로 변환해서 호출)
 void Session::post_write(const std::string& msg) {
     post_write(std::make_shared<std::string>(msg));
 }
@@ -287,9 +288,9 @@ void Session::enqueue_write(std::shared_ptr<std::string> msg) {
         ++write_queue_overflow_count_;
         if (write_queue_overflow_count_ >= static_cast<size_t>(AppContext::instance().config.value("write_queue_overflow_limit", 10))) {
             AppContext::instance().logger->error("[Session][enqueue_write] write_queue FULL 연속 {}회, 세션 종료!", write_queue_overflow_count_);
-            closed_ = true;
+            //closed_ = true;
             //실제 종료 실행
-            close_session();
+            close_session();   // 바로 종료
             return;
         }
     }
@@ -302,7 +303,12 @@ void Session::enqueue_write(std::shared_ptr<std::string> msg) {
 }
 
 void Session::close_session() {
-    if (closed_.exchange(true)) return;
+    //if (closed_.exchange(true)) return;
+    //set_state(SessionState::Closed);
+    if (!try_close()) {
+        AppContext::instance().logger->debug("[Session] 중복 close_session() 무시 id={}", session_id_);
+        return;
+    }
     set_state(SessionState::Closed);
 
     // 타이머 취소
@@ -322,21 +328,61 @@ void Session::close_session() {
         socket_.close(ec);
         if (ec) AppContext::instance().logger->error("[close_session] tcp close error: {}", ec.message());
 
-        // 마지막에 세션 제거 (핸들러에서 release 등 포함)
+        finalize_close();
+        // DataHandler가 존/풀 제거를 책임짐
         if (auto handler = data_handler_.lock()) {
             handler->remove_session(session_id_);
-        }
-        else 
-        {
+        } else {
             AppContext::instance().logger->warn("[close_session] DataHandler expired while closing session {}", session_id_);
         }
 
-		cleanup();  
+        cleanup();  // 내부 상태 초기화
     }
     catch (const std::exception& e) {
         AppContext::instance().logger->error("[close_session] Exception: {}", e.what());
     }
 }
+
+// Lifecycle 관리 메서드
+bool Session::try_activate() {
+    uint8_t expected = static_cast<uint8_t>(LifeState::Idle);
+    return life_state_.compare_exchange_strong(expected, static_cast<uint8_t>(LifeState::Active));
+}
+
+bool Session::try_close() {
+    uint8_t expected = static_cast<uint8_t>(LifeState::Active);
+    if (life_state_.compare_exchange_strong(expected, static_cast<uint8_t>(LifeState::Closing)))
+        return true;
+    expected = static_cast<uint8_t>(LifeState::Idle);
+    if (life_state_.compare_exchange_strong(expected, static_cast<uint8_t>(LifeState::Closing)))
+        return true;
+    return false;
+}
+
+void Session::finalize_close() {
+    life_state_.store(static_cast<uint8_t>(LifeState::Closed), std::memory_order_release);
+}
+
+void Session::mark_released() {
+    life_state_.store(static_cast<uint8_t>(LifeState::Released), std::memory_order_release);
+}
+
+Session::LifeState Session::get_life_state() const {
+    return static_cast<LifeState>(life_state_.load(std::memory_order_acquire));
+}
+
+void Session::set_active(bool v) {
+    if (v) try_activate();
+    else {
+        uint8_t expected = static_cast<uint8_t>(LifeState::Active);
+        life_state_.compare_exchange_strong(expected, static_cast<uint8_t>(LifeState::Idle));
+    }
+}
+
+bool Session::is_active() const {
+    return get_life_state() == LifeState::Active;
+}
+//
 
 void Session::cleanup() {
     //내부 상태 초기화 (재사용 준비)
@@ -383,78 +429,11 @@ void Session::cleanup() {
 
     nickname_registered_.store(false);
 
-    active_.store(false);
-
-    AppContext::instance().logger->info("[Session::cleanup] session_id={} internal state cleared (no zone/pool ops)", session_id_);
+    //active_.store(false);
+    //AppContext::instance().logger->info("[Session::cleanup] session_id={} internal state cleared (no zone/pool ops)", session_id_);
+    life_state_.store(static_cast<uint8_t>(LifeState::Idle), std::memory_order_release);
+    AppContext::instance().logger->info("[Session::cleanup] session_id={} 내부 상태 초기화 완료 (life=Idle)", session_id_);
 }
-
-//void Session::cleanup() {
-//    auto self = shared_from_this();
-//
-//    // 1) 존에서 제거 (존에 등록돼 있을 경우만)
-//    if (zone_id_ != -1) {
-//        int old_zone_id = zone_id_;  // 로그 정확도를 위해 제거 전 값 보존
-//        auto zone_ptr = get_zone();
-//        if (zone_ptr) {
-//            zone_ptr->remove_session(self);
-//            set_zone_id(-1);   // 세션의 zone_id 초기화
-//            clear_zone();      // 세션의 zone 정보 초기화
-//            AppContext::instance().logger->info(
-//                "[Session] 존에서 세션 제거 완료: zone_id={}, session_id={}",
-//                old_zone_id, session_id_);
-//        }
-//        else {
-//            AppContext::instance().logger->warn(
-//                "[Session] 존 포인터 없음. 제거 스킵: zone_id={}, session_id={}",
-//                old_zone_id, session_id_);
-//            // 그래도 내부 상태는 초기화
-//            set_zone_id(-1);
-//            clear_zone();
-//        }
-//    }
-//
-//    // 2) Pool 반환 (세션 풀 사용 시)
-//    if (released_.exchange(true)) {
-//        // 이미 반환 처리된 경우
-//        AppContext::instance().logger->info(
-//            "[Session] 이미 풀 반환된 세션입니다. session_id={}", session_id_);
-//        return;
-//    }
-//
-//    if (release_callback_) {
-//        // 풀로 반환
-//        release_callback_(self);
-//    }
-//    else {
-//        AppContext::instance().logger->warn(
-//            "[Session] release_callback_ 이 설정되지 않음! 세션이 풀로 반환되지 않을 수 있음. session_id={}",
-//            session_id_);
-//    }
-//}
-
-//void Session::cleanup() {
-//    auto self = shared_from_this();
-//    // 1. 존에서 제거 (존에 등록돼 있을 경우만)
-//    if (zone_id_ != -1) {
-//        auto zone = get_zone();
-//        if (zone) {
-//            zone->remove_session(self);
-//            set_zone_id(-1);  // 존 제거 후 무조건 초기화
-//            clear_zone();
-//            AppContext::instance().logger->info("[Session] 존에서 세션 제거 완료: zone_id={}, session_id={}", zone_id_, session_id_);
-//        }
-//    }
-//
-//    // 2. Pool 반환 (세션 풀 사용 시)
-//    if (released_.exchange(true)) return;
-//
-//    if (release_callback_) {
-//        release_callback_(shared_from_this());
-//    }
-//    else {
-//        AppContext::instance().logger->warn("[Session] release_callback_ 이 설정되지 않음! 세션이 풀로 반환되지 않을 수 있음.");
-//    }
-//}
 
 void Session::do_read() 
 {

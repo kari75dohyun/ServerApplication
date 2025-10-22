@@ -93,7 +93,7 @@ std::optional<std::string> MessageBufferManager::extract_message() {
 
     //// 길이 유효성 검사 추가!
     //if (len == 0 || len > MAX_PACKET_SIZE) {
-    //    // 비정상 패킷 길이 → 방어 코드!
+    //    // 비정상 패킷 길이 -> 방어 코드!
     //    buffer_.clear();  // 버퍼 파기 (DoS 방지)
     //    // 추가: 로그 남기기(이 함수에 logger 접근권한 없으면 호출부에서)
     //    last_clear_by_invalid_length_ = true;  // 비정상 길이 감지!

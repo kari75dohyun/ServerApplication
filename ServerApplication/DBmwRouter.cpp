@@ -87,7 +87,7 @@ void DBmwRouter::handle(const wire::Envelope& env) {
         // JSON 버전과 동일한 처리
         if (ack.result() == "ok") {
             AppContext::instance().logger->info("[DBMW][PB] server_login_ack OK (nickname={})", ack.nickname());
-            // 로그인 성공 → 인증 플래그 켜기
+            // 로그인 성공 -> 인증 플래그 켜기
             if (auto cli = AppContext::instance().db_client.lock()) {
                 cli->mark_authed(true);
             }
@@ -98,7 +98,7 @@ void DBmwRouter::handle(const wire::Envelope& env) {
         break;
     }
     case T::KEEPALIVE_ACK: {
-        // 하트비트 응답 → 미스 카운터 리셋
+        // 하트비트 응답 -> 미스 카운터 리셋
         if (auto cli = AppContext::instance().db_client.lock()) {
             cli->note_heartbeat_ack();
         }
