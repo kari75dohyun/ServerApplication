@@ -129,7 +129,7 @@
     <ClCompile Include="generated\wire.pb.cc">
       <Filter>소스 파일\generated</Filter>
     </ClCompile>
-    <ClCompile Include="ChatZoneHandler.cpp">
+    <ClCompile Include="MessageHandlers\ChatZoneHandler.cpp">
       <Filter>소스 파일\MessageHandlers</Filter>
     </ClCompile>
   </ItemGroup>

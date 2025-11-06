@@ -156,7 +156,6 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="ChatZoneHandler.cpp" />
     <ClCompile Include="DataHandler.cpp" />
     <ClCompile Include="DBMiddlewareClient.cpp" />
     <ClCompile Include="DBmwRouter.cpp" />
@@ -169,6 +168,7 @@
     <ClCompile Include="MessageDispatcher.cpp" />
     <ClCompile Include="MessageHandlers\CertifyHandler.cpp" />
     <ClCompile Include="MessageHandlers\ChatHandler.cpp" />
+    <ClCompile Include="MessageHandlers\ChatZoneHandler.cpp" />
     <ClCompile Include="MessageHandlers\KeepaliveHandler.cpp" />
     <ClCompile Include="SessionManager.cpp" />
     <ClCompile Include="SessionPool.cpp" />
