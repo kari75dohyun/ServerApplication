@@ -414,7 +414,6 @@ void Session::set_active(bool v) {
 bool Session::is_active() const {
     return get_life_state() == LifeState::Active;
 }
-//
 
 void Session::cleanup() {
     //내부 상태 초기화 (재사용 준비)
