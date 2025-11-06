@@ -391,31 +391,6 @@ bool Session::try_close() {
     return false;
 }
 
-void Session::finalize_close() {
-    life_state_.store(static_cast<uint8_t>(LifeState::Closed), std::memory_order_release);
-}
-
-void Session::mark_released() {
-    life_state_.store(static_cast<uint8_t>(LifeState::Released), std::memory_order_release);
-}
-
-Session::LifeState Session::get_life_state() const {
-    return static_cast<LifeState>(life_state_.load(std::memory_order_acquire));
-}
-
-void Session::set_active(bool v) {
-    if (v) try_activate();
-    else {
-        uint8_t expected = static_cast<uint8_t>(LifeState::Active);
-        life_state_.compare_exchange_strong(expected, static_cast<uint8_t>(LifeState::Idle));
-    }
-}
-
-bool Session::is_active() const {
-    return get_life_state() == LifeState::Active;
-}
-//
-
 void Session::cleanup() {
     //내부 상태 초기화 (재사용 준비)
     nickname_.clear();
