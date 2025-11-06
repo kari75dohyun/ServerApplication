@@ -25,7 +25,7 @@ using namespace boost::asio;
 //constexpr size_t mzx_pool_size = 10000;  // session 풀을 1024개가 넘으면 자동 증가 하지만, max 사이즈 만큼은 못넘게 한다.
 
 int main() {
-    //libcurl 초기화
+    // libcurl 초기화 -> http 통신을 하려고 초기화 한다.
     CURLcode global_init_res = curl_global_init(CURL_GLOBAL_DEFAULT);
     if (global_init_res != CURLE_OK) {
         std::cerr << "curl_global_init() failed: "
@@ -35,6 +35,7 @@ int main() {
 
     init_logger();
     AppContext::instance().logger->info("=== 서버 시작! ===");
+    // config.json 로드 
     load_config();
 
     AppContext::instance().logger->info("Logger and config initialized.");
@@ -60,7 +61,7 @@ int main() {
             AppContext::instance().config.value("max_zone_count", 10),
             max(4u, thread::hardware_concurrency() * 2)
         );
-
+        // 세션풀을 민들어 놓고, 재사용한다.
         auto session_pool = std::make_shared<SessionPool>(
             AppContext::instance().config.value("session_pool_size", 1024),
             AppContext::instance().config.value("max_session_pool_size", 10000),
@@ -178,7 +179,7 @@ int main() {
         AppContext::instance().config.value("dbmw_host", std::string("127.0.0.1")),
         AppContext::instance().config.value("dbmw_port", 40001));
 
-        // 5. 시그널 핸들링 (Ctrl+C 안전 종료)
+        // 5. 시그널 핸들링 (안전 종료)
         boost::asio::signal_set signals(io, SIGINT, SIGTERM);
         signals.async_wait([&](const boost::system::error_code&, int) {
             AppContext::instance().logger->info("Signal received. Shutting down...");

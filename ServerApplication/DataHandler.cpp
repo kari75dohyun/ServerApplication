@@ -198,7 +198,7 @@ void DataHandler::do_keepalive_check() {
     // 2. 락 해제 후(즉, 세션 안전하게 순회 후) 실제 close_session 호출
     for (auto& sess : sessions_to_close) {
         //cout << "[KEEPALIVE TIMEOUT] session_id=" << sess->get_session_id() << " - close session" << endl;
-        AppContext::instance().logger->info("[KEEPALIVE TIMEOUT] session_id= {}", sess->get_session_id(), "- close session");
+        AppContext::instance().logger->info("[KEEPALIVE TIMEOUT] session_id={} - close session", sess->get_session_id());
         sess->close_session();
     }
 }
@@ -377,43 +377,61 @@ void DataHandler::on_udp_receive(const std::string& msg,
     }
 
     // 7. 엔드포인트 변화 감지 및 "단일" 갱신(전역맵 + 세션 내 상태)
-    auto prev_ep_snapshot = session->get_udp_endpoint(); // 락 밖 스냅샷
-    if (!prev_ep_snapshot || *prev_ep_snapshot != from) {
-        AppContext::instance().logger->info(
-            "[UDP] endpoint 변경 감지! 이전: {}:{} -> 신규: {}:{}",
-            prev_ep_snapshot ? prev_ep_snapshot->address().to_string() : "N/A",
-            prev_ep_snapshot ? prev_ep_snapshot->port() : 0,
-            from.address().to_string(),
-            from.port()
-        );
+    if (type == "udp_register") {
+        auto prev_ep_snapshot = session->get_udp_endpoint(); // 락 밖 스냅샷
+        if (!prev_ep_snapshot || *prev_ep_snapshot != from) {
+            AppContext::instance().logger->info(
+                "[UDP] endpoint 변경 감지! 이전: {}:{} -> 신규: {}:{}",
+                prev_ep_snapshot ? prev_ep_snapshot->address().to_string() : "N/A",
+                prev_ep_snapshot ? prev_ep_snapshot->port() : 0,
+                from.address().to_string(),
+                from.port()
+            );
 
-        // 전역 매핑 갱신, 안전하게 비교/삭제 후 등록
-        {
-            std::lock_guard<std::mutex> lock(udp_endpoint_mutex_);
+            // 전역 매핑 갱신, 안전하게 비교/삭제 후 등록
+            {
+                std::lock_guard<std::mutex> lock(udp_endpoint_mutex_);
 
-            // 7-1. 이전 엔드포인트 키가 여전히 이 세션을 가리키는 경우에만 제거
-            if (prev_ep_snapshot) {
-                auto it = udp_endpoint_to_session_.find(*prev_ep_snapshot);
-                if (it != udp_endpoint_to_session_.end()) {
-                    if (auto existing = it->second.lock()) {
-                        if (existing.get() == session.get()) {
+                // 7-1. 이전 엔드포인트 키가 여전히 이 세션을 가리키는 경우에만 제거
+                if (prev_ep_snapshot) {
+                    auto it = udp_endpoint_to_session_.find(*prev_ep_snapshot);
+                    if (it != udp_endpoint_to_session_.end()) {
+                        if (auto existing = it->second.lock()) {
+                            if (existing.get() == session.get()) {
+                                udp_endpoint_to_session_.erase(it);
+                            }
+                            // else: 이미 다른 세션으로 바뀌었으면 건드리지 않음
+                        }
+                        else {
+                            // weak_ptr 만료 -> 정리
                             udp_endpoint_to_session_.erase(it);
                         }
-                        // else: 이미 다른 세션으로 바뀌었으면 건드리지 않음
+                    }
+                }
+
+                // 7-2. 신규 엔드포인트 매핑 등록/갱신 (충돌 시 교체 정책)
+                auto itNew = udp_endpoint_to_session_.find(from);
+                if (itNew != udp_endpoint_to_session_.end()) {
+                    if (auto existing = itNew->second.lock()) {
+                        if (existing.get() != session.get()) {
+                            // 다른 세션이 점유 중 -> 교체(Replace) 정책
+                            udp_endpoint_to_session_.erase(itNew);
+                        }
+                        // else: 이미 내 세션이면 그대로 둬도 OK (중복 insert 불필요)
                     }
                     else {
                         // weak_ptr 만료 -> 정리
-                        udp_endpoint_to_session_.erase(it);
+                        udp_endpoint_to_session_.erase(itNew);
                     }
                 }
+                // 최종 등록(또는 갱신)
+                udp_endpoint_to_session_[from] = session;
+
             }
 
-            // 7-2. 신규 엔드포인트 매핑 등록/갱신
-            udp_endpoint_to_session_[from] = session;
+            // 7-3. 세션 내부 상태 갱신 (락 밖)
+            session->set_udp_endpoint(from);
         }
-
-        // 7-3. 세션 내부 상태 갱신 (락 밖)
-        session->set_udp_endpoint(from);
     }
 
     // 최신 UDP 생존 타임스탬프 갱신
