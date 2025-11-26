@@ -467,4 +467,4 @@ ServerApplication/
 
 8. 이때 SessionManager.for_each_session은 스냅샷 후 락 해제 -> 각 세션에 post_write(I/O는 락 밖)
 
-9. 이후 채팅/UDP 등은 각 Session의 상태/큐를 통해 송수신
+9. 이후 채팅/UDP 등은 각 Session의 상태/큐를 통해 송수신함 
