@@ -22,7 +22,7 @@
 
 ##  목차 (Table of Contents)
 1. [빠른 시작 (Quick Start)](#1-빠른-시작-quick-start)
-2. [아키텍처 및 흐름도](#2-Architecture)
+2. [아키텍처 및 흐름도 (architecture)](#2-아키텍처-및-흐름도-architecture)
     - [UDP 인증 및 통신 흐름](#udp-인증-및-통신-흐름-reliable-udp)
     - [Keepalive & Lifecycle](#keepalive--lifecycle)
 3. [프로젝트 구조](#3-프로젝트-구조)
@@ -37,7 +37,7 @@
 
 ## 1. 빠른 시작 (Quick Start)
 
-### 📋 요구사항 (Prerequisites)
+### 요구사항 (Prerequisites)
 * **OS**: Windows 10/11 (Visual Studio 2019+), Linux (Docker/CMake)
 * **Dependencies** (vcpkg 권장):
     * `boost-asio`, `spdlog`, `nlohmann-json`, `protobuf`, `libcurl`
@@ -74,7 +74,7 @@
   "udp_token_ttl_seconds": 300,
   "max_udp_packet_size": 1024
 }
-
+```
 
 ### 빌드
 1. VS에서 `ServerApplication.vcxproj` 오픈
@@ -88,8 +88,20 @@ bash
 
  로그: `Server.log`
 -기본 포트: TCP `12345`, UDP `54321` (config로 변경)
+Build: Visual Studio에서 ServerApplication.vcxproj를 열고 x64-Release로 빌드합니다.
 
-## 2. 아키텍처 및 흐름도 (Architecture)
+Run:
+
+Bash
+
+set MY_SERVER_SECRET=your-secret-key
+ServerApplication.exe
+로그 확인: Server.log
+
+기본 포트: TCP 12345, UDP 54321
+
+
+## 2. 아키텍처 및 흐름도 (architecture)
 
 ### UDP 인증 및 통신 흐름 (Reliable UDP)
 서버는 **토큰(Token)과 엔드포인트(IP:Port) 이중 검증**을 통해 신뢰할 수 있는 UDP 통신을 보장합니다.
@@ -160,7 +172,7 @@ graph TD
   8. UDP 핸들러 호출(`udp`, `broadcast_udp`, `broadcast_udp_zone` 등)
 
 > **네트워크 전환(Wi‑Fi↔LTE)**: 엔드포인트(IP:포트)가 바뀌면 서버가 `ENDPOINT_MISMATCH`를 보내므로 **클라는 `udp_register` 재요청**으로 새 토큰을 수령해야 합니다.
-
+```
 
 ## 3. 프로젝트 구조
 
