@@ -592,18 +592,18 @@ sequenceDiagram
     participant Server (UdpRegisterHandler)
     participant Session (DataHandler)
 
-    Note over Client, Server: 1. 초기 등록 (Handshake)
+    Note over Client, Server: 1. initial registration (Handshake)
     Client->>Server: {"type": "udp_register", "nickname": "UserA"}
     Server->>Server: Generate Random Token (TTL 300s)
     Server-->>Client: {"type": "udp_register_ack", "token": "XYZ123"}
 
-    Note over Client, Server: 2. 보안 통신 (Secure Transport)
+    Note over Client, Server: 2. secure communication (Secure Transport)
     Client->>Session: {"type": "udp", "token": "XYZ123", "msg": "Hello"}
     
     Session->>Session: Validate Token & Endpoint
     alt Token/Endpoint Mismatch
         Session-->>Client: Error: ENDPOINT_MISMATCH
-        Note right of Client: 클라이언트는 재등록(Register) 시도
+        Note right of Client: Client re-registers(Register) trial
     else Valid
         Session->>Session: Rate Limit Check
         Session->>Server: Process Message
