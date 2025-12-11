@@ -499,7 +499,7 @@ ServerApplication/
 * ** Scalable Architecture:** Zone-based broadcasting system and Protobuf routing structure for external DB Middleware (DBMW) integration.
 
 ##  Table of Contents
-1. [Quick Start](#1quick-start)
+1. [Quick Start](#1-quick-start)
 2. [아키텍처 및 흐름도 (architecture)](#2-아키텍처-및-흐름도-architecture)
     - [UDP 인증 및 통신 흐름](#udp-인증-및-통신-흐름-reliable-udp)
     - [Keepalive & Lifecycle](#keepalive--lifecycle)
