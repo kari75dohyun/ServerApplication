@@ -81,6 +81,7 @@
 2. vcpkg 또는 프로젝트 설정으로 필요한 라이브러리 포함
 3. `x64-Release` 빌드 권장
 4. 리눅스에서 실행 시키려면, VSCode 로 열어서 CMake 빌드 한 다음, docker 로 리눅스에서 실행 시키는 VSCode 버전이 존재 합니다. 아직 코드를 업데이트 하지 않아 과거 버전이 있습니다.
+5. 폴더 안에 ConsoleBoostUDPClient.zip  파일 압축을 풀어  Vistual Studio 2022 이상에서 실행시켜 Test Client 로 사용한다.
 
 ### 실행
 bash
