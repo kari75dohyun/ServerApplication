@@ -491,15 +491,15 @@ ServerApplication/
 
 ---
 
-##  Key Features (핵심 기능)
+##  Key Features 
 
-* ** High Performance:** `Boost.Asio` 비동기 I/O와 `Lock Partitioning`(Session Sharding)을 적용하여 락 경합 최소화.
-* ** Secure UDP:** 단순 UDP가 아닌, **3-way Handshake(토큰 발급)** 및 **엄격한 엔드포인트 검증**을 통한 스푸핑 방지.
-* ** Smart Session Management:** `Generation ID`를 활용한 Stale Session 방지 및 `weak_ptr` 기반의 안전한 생명주기 관리.
-* ** Scalable Architecture:** 존(Zone) 기반 브로드캐스팅 시스템 및 외부 DB Middleware(DBMW) 연동을 위한 Protobuf 라우팅 구조.
+* ** High Performance:** Minimizes lock contention by utilizing Boost.Asio asynchronous I/O and Lock Partitioning (Session Sharding).
+* ** Secure UDP:** Prevents spoofing via **3-way Handshake (token issuance)** and **strict endpoint verification**, going beyond simple UDP.
+* ** Smart Session Management:** Prevents Stale Sessions using `Generation ID` and ensures safe lifecycle management based on `weak_ptr`.
+* ** Scalable Architecture:** Zone-based broadcasting system and Protobuf routing structure for external DB Middleware (DBMW) integration.
 
-##  목차 (Table of Contents)
-1. [빠른 시작 (Quick Start)](#1-빠른-시작-quick-start)
+##  Table of Contents
+1. [Quick Start](#1quick-start)
 2. [아키텍처 및 흐름도 (architecture)](#2-아키텍처-및-흐름도-architecture)
     - [UDP 인증 및 통신 흐름](#udp-인증-및-통신-흐름-reliable-udp)
     - [Keepalive & Lifecycle](#keepalive--lifecycle)
@@ -513,17 +513,17 @@ ServerApplication/
 
 ---
 
-## 1. 빠른 시작 (Quick Start)
+## 1. Quick Start
 
-### 요구사항 (Prerequisites)
+### Prerequisites
 * **OS**: Windows 10/11 (Visual Studio 2019+), Linux (Docker/CMake)
-* **Dependencies** (vcpkg 권장):
+* **Dependencies** (vcpkg recommended):
     * `boost-asio`, `spdlog`, `nlohmann-json`, `protobuf`, `libcurl`
-* **Environment**: `MY_SERVER_SECRET` 환경변수 설정 필수.
+* **Environment**: `MY_SERVER_SECRET` environment variable setting required.
 
-### ⚙️ 설정 파일 (`config.json`)
+### ⚙️ config file (`config.json`)
 
-아래 내용을 `config.json`으로 저장하여 사용합니다.
+Save the contents below as `config.json` and use it.
 
 ```json
 {
