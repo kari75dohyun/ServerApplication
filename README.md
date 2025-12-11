@@ -500,16 +500,16 @@ ServerApplication/
 
 ##  Table of Contents
 1. [Quick Start](#1-quick-start)
-2. [아키텍처 및 흐름도 (architecture)](#2-아키텍처-및-흐름도-architecture)
-    - [UDP 인증 및 통신 흐름](#udp-인증-및-통신-흐름-reliable-udp)
+2. [Architecture](#2-architecture)
+    - [UDP Authentication and Communication Flow](#udp-reliable-udp)
     - [Keepalive & Lifecycle](#keepalive--lifecycle)
-3. [프로젝트 구조](#3-프로젝트-구조)
-4. [설정 및 프로토콜](#4-설정-및-프로토콜-configuration)
-5. [유지/모니터링](#5-유지모니터링-configuration)
-6. [DB Middleware (옵션)](#6-db-middleware옵션-configuration)
-7. [운영 팁](#7-운영-팁)
-8. [라이선스/크레딧](#8-라이선스크레딧)
-9. [중요 함수 설명서 (API Reference)](#9-중요-함수-설명서-api-reference)
+3. [Project structure](#3-project-structure)
+4. [Settings and Protocols](#4-Settings-and-Protocols-configuration)
+5. [Maintenance/Monitoring](#5-MaintenanceMonitoring-configuration)
+6. [DB Middleware (option)](#6-db-middlewareoption-configuration)
+7. [Operational Tips](#7-operational-Tips)
+8. [License/Credit](#8-licensecredit)
+9. [Important function documentation (API Reference)](#9-Important-function-documentation-api-reference)
 
 ---
 
@@ -554,21 +554,21 @@ Save the contents below as `config.json` and use it.
 }
 ```
 
-### 빌드
-1. VS에서 `ServerApplication.vcxproj` 오픈
-2. vcpkg 또는 프로젝트 설정으로 필요한 라이브러리 포함
-3. `x64-Release` 빌드 권장
-4. 리눅스에서 실행 시키려면, VSCode 로 열어서 CMake 빌드 한 다음, docker 로 리눅스에서 실행 시키는 VSCode 버전이 존재 합니다. 아직 코드를 업데이트 하지 않아 과거 버전이 있습니다.
-5. 폴더 안에 ConsoleBoostUDPClient.zip  파일 압축을 풀어  Vistual Studio 2022 이상에서 실행시켜 Test Client 로 사용한다.
+### Build
+1. Open `ServerApplication.vcxproj` in Visual Studio
+2. Include the required libraries with vcpkg or project settings
+3. `x64-Release` build is recommended
+4. To run on Linux, there is a VSCode version that allows you to open the application in Visual Studio Code, build with CMake, and then run it on Linux with Docker. The code hasn't been updated yet, so there's an outdated version.
+5. Unzip the ConsoleBoostUDPClient.zip file in the folder and run it in Visual Studio 2022 or later to use it as a test client.
 
-### 실행
+### Run
 bash
 > set MY_SERVER_SECRET=your-secret
 > ServerApplication.exe
 
- 로그: `Server.log`
--기본 포트: TCP `12345`, UDP `54321` (config로 변경)
-Build: Visual Studio에서 ServerApplication.vcxproj를 열고 x64-Release로 빌드합니다.
+Log: `Server.log`
+- Default port: TCP `12345`, UDP `54321` (change in config)
+Build: Open ServerApplication.vcxproj in Visual Studio and build with x64-Release.
 
 Run:
 
@@ -576,15 +576,15 @@ Bash
 
 set MY_SERVER_SECRET=your-secret-key
 ServerApplication.exe
-로그 확인: Server.log
+Check log: Server.log
 
-기본 포트: TCP 12345, UDP 54321
+default port: TCP 12345, UDP 54321
 
 
-## 2. 아키텍처 및 흐름도 (architecture)
+## 2. Architecture
 
-### UDP 인증 및 통신 흐름 (Reliable UDP)
-서버는 **토큰(Token)과 엔드포인트(IP:Port) 이중 검증**을 통해 신뢰할 수 있는 UDP 통신을 보장합니다.
+### UDP Authentication and Communication Flow (Reliable UDP)
+The server ensures reliable UDP communication through **double verification of tokens and endpoints (IP:Port).**
 
 ```mermaid
 sequenceDiagram
@@ -621,195 +621,191 @@ graph TD
     B --> G[Wait 60s]
     G --> B
 ```
-    갱신: keepalive 패킷 수신 시 Session::update_alive_time() 호출.
+  Update: Call Session::update_alive_time() when a keepalive packet is received.
 
-    감시: 글로벌 타이머 DataHandler::start_keepalive_loop()가 60초 간격으로 실행.
+  Watch: The global timer DataHandler::start_keepalive_loop() fires every 60 seconds.
 
-    정리: now - last_alive_time > 60s 이면 close_session() 수행.
+  Cleanup: Now, if last_alive_time > 60 seconds, close_session() is executed.
 
-### TCP 흐름
-1) 클라이언트 TCP 접속 -> `Server`가 `Session` 생성/등록
-2) 수신 JSON의 `type`에 따라 `MessageDispatcher`가 핸들러 호출
-   - 지원 타입: `login`, `logout`, `chat`, `chat_zone`, `keepalive`, (기타는 에러)
-3) `keepalive` 수신 시 `Session::update_alive_time()`으로 마지막 활동 갱신
-4) 글로벌 타이머 `DataHandler::start_keepalive_loop()`가 **60초** 간격으로 `do_keepalive_check()` 호출
-   - `now - last_alive_time > 60s` 이면 `close_session()`
+### TCP Flow
+1) Client TCP connection -> `Server` creates/registers `Session`
+2) `MessageDispatcher` invokes a handler based on the `type` of the received JSON
+- Supported types: `login`, `logout`, `chat`, `chat_zone`, `keepalive` (others are errors)
+3) When `keepalive` is received, `Session::update_alive_time()` updates the last activity
+4) The global timer `DataHandler::start_keepalive_loop()` calls `do_keepalive_check()` every **60 seconds**
+- If `now - last_alive_time > 60s`, `close_session()` is invoked
 
- **권장 값**: 클라 keepalive 20s, 서버 타임아웃 ≥ 60s (현재 코드 그대로면 10s 단절은 세션 유지)
+**Recommended values**: Client keepalive 20s, server timeout ≥ 60s (current code maintains the session even if a 10s disconnection occurs)
 
-### UDP 흐름 (토큰+엔드포인트 이중 인증)
-- 최초: 클라가 UDP로 `{"type":"udp_register","nickname":"<nick>"}` 전송
-  1. 서버(`UdpRegisterHandler`)가 **엔드포인트 바인딩** + **랜덤 토큰 발급(기본 TTL=300s)**
-  2. 응답 `udp_register_ack`에 `token` 포함
-- 이후 모든 UDP에는 `nickname` + `token` + `type` 포함
-- `DataHandler::on_udp_receive()` 검증 단계
-  1. 서버 전체 레이트리밋(샤드)
-  2. JSON 파싱
-  3. 닉네임 존재 확인 -> 세션 조회
-  4. (udp_register 제외) **토큰 일치 & TTL** 검사
-  5. (udp_register 제외) **엔드포인트 일치** 검사 -> 불일치 시 `udp_error: ENDPOINT_MISMATCH`
-  6. 세션별 토큰버킷 레이트리밋
-  7. (변화 감지) 엔드포인트 스냅샷과 다르면 **전역맵/세션 값 갱신**
-  8. UDP 핸들러 호출(`udp`, `broadcast_udp`, `broadcast_udp_zone` 등)
+### UDP Flow (Token + Endpoint Two-Factor Authentication)
+- Initial: Client sends `{"type":"udp_register","nickname":"<nick>"}` via UDP
+1. Server (`UdpRegisterHandler`) **binds the endpoint** + **issues a random token (default TTL=300s)**
+2. Response `udp_register_ack` includes `token`
+- All subsequent UDPs include `nickname` + `token` + `type`
+- `DataHandler::on_udp_receive()` verification step
+  1. Server-wide late limit (shard)
+  2. JSON parsing
+  3. Nickname existence check -> Session lookup
+  4. (Excluding udp_register) **Token match & TTL** check
+  5. (Excluding udp_register) **Endpoint match** check -> If mismatched, `udp_error: ENDPOINT_MISMATCH`
+  6. Session-specific token bucket late limit
+  7. (Change detection) **Update global map/session values** if different from endpoint snapshot
+  8. UDP handler call (`udp`, `broadcast_udp`, `broadcast_udp_zone`, etc.)
 
-> **네트워크 전환(Wi‑Fi↔LTE)**: 엔드포인트(IP:포트)가 바뀌면 서버가 `ENDPOINT_MISMATCH`를 보내므로 **클라는 `udp_register` 재요청**으로 새 토큰을 수령해야 합니다.
+> **Network switch (Wi-Fi↔LTE):** If the endpoint (IP:port) changes, the server sends an `ENDPOINT_MISMATCH` message, so the **client must re-request `udp_register` to receive a new token.
 ---
 
-## 3. 프로젝트 구조
+## 3. Project structure
 
 ServerApplication/
-  AppContext.h            - 전역 컨텍스트(로거, config, 약한참조 등)
-  ServerApplication.cpp   - main(), io_context, Server/UDPManager/DBMW 초기화
-  Server.{h,cpp}          - TCP acceptor, 세션 생성
-  Session{,.cpp,.h}       - 1 TCP 연결 = 1 세션. write 큐/상태/타임스탬프
-  SessionManager{,.cpp}   - 세션 등록/검색/순회/정리
-  SessionPool{,.cpp}      - 세션 객체 풀
-  DataHandler{,.cpp,.h}   - 상위 오케스트레이터(브로드캐스트, UDP 수신, keepalive 루프)
-  MessageDispatcher{,.h,cpp} - type별 핸들러 라우팅(TCP/UDP)
+
+  AppContext.h            - Global context (logger, config, weak references, etc.)
+  ServerApplication.cpp   - main(), io_context, Server/UDPManager/DBMW initialization
+  Server.{h,cpp}          - TCP acceptor, session creation
+  Session{,.cpp,.h}       - 1 TCP connection = 1 session. Write Queue/Status/Timestamp
+  SessionManager{,.cpp}   - Session registration/search/traversal/cleanup
+  SessionPool{,.cpp}      - Session object pool
+  DataHandler{,.cpp,.h}   - High-level orchestrator (broadcast, UDP reception, keepalive loop)
+  MessageDispatcher{,.h,cpp} - Type-specific handler routing (TCP/UDP)
 
   MessageHandlers/
-    Chat(Zone)Handler.*   - 채팅/존 채팅
-    CertifyHandler.*      - 인증/로그인 흐름 일부
-    KeepaliveHandler.*    - 클라->서버 keepalive 수신
+  Chat(Zone)Handler.*     - Chat/Zone chat
+  CertifyHandler.*        - Part of the authentication/login flow
+  KeepaliveHandler.*      - Client-to-server keepalive reception
 
   UDPMessageHandlers/
-    UdpHandler.*          - 기본 에코/샘플
-    UdpRegisterHandler.*  - UDP 엔드포인트 바인딩 + 토큰 발급/TTL 적용
-    UdpBroadcast(Zone)Handler.* - UDP 브로드캐스트(전체/존)
+    UdpHandler.*          - Basic echo/sample
+    UdpRegisterHandler.*  - UDP endpoint binding + token issuance/TTL enforcement
+    UdpBroadcast(Zone)Handler.*  - UDP broadcast (global/zone)
 
-  Zone{,Manager}.{h,cpp}  - 존 관리/브로드캐스트
-  UDPManager{,.h,cpp}     - UDP 소켓 생성/수신 루프 -> DataHandler로 전달
-  DBMiddlewareClient.*    - (옵션) 외부 DBMW 연동 (라우터 DBmwRouter와 함께)
-  DBmwRouter.* / DBmwHandlerRegistry.* - DBMW 메시지 라우팅
+  Zone{,Manager}.{h,cpp}  - Zone management/broadcasting
+  UDPManager{,.h,cpp}     - UDP socket creation/reception loop -> passing to DataHandler
+  DBMiddlewareClient.*    - (Optional) External DBMW integration (with DBmwRouter router)
+  DBmwRouter.* / DBmwHandlerRegistry.* - DBMW message routing
 
-  Logger.{h,cpp}          - spdlog 초기화(파일 로그)
-  Utility.{h,cpp}         - 토큰 생성, 레이트리밋, JSON 파싱, config 로드 등
-  MemoryTracker.*         - 메모리 사용량 로그
-  MessageBufferManager.*  - 송신 버퍼 관리
+  Logger.{h,cpp}          - Initialize spdlog (file logging)
+  Utility.{h,cpp}         - Token generation, rate limiting, JSON parsing, config loading, etc.
+  MemoryTracker.*         - Memory usage log
+  MessageBufferManager.*  - Send buffer management
   generated/
-    wire.pb.{h,cc}        - protobuf 메시지(옵션 경로)
-  wire.proto              - PB 정의
-  config.json             - 서버 설정
+  wire.pb.{h,cc}          - Protobuf message (optional path)
+  wire.proto              - PB definition
+  config.json             - Server configuration
 
-## 4. 설정 및 프로토콜 (Configuration)
+## 4. Settings and Protocols (Configuration)
 
-- `tcp_port`, `udp_port`: 포트
-- `udp_token_ttl_seconds`: UDP 토큰 TTL(기본 300s)
-- `udp_expire_timeout_seconds`: UDP idle 로깅 기준(현재는 TCP 살아있으면 유지)
-- `total_limit_per_sec`, `user_limit_per_sec`: UDP 레이트리밋
-- `max_zone_count`, `zone_max_sessions`/`max_zone_session_count`: 존 규모
-- `dbmw_*`: DBMW 접속/하트비트 (현재 main에서 초기화 코드 동작)
+- `tcp_port`, `udp_port`: Port
+- `udp_token_ttl_seconds`: UDP token TTL (default 300s)
+- `udp_expire_timeout_seconds`: UDP idle logging criteria (currently maintained as long as TCP is alive)
+- `total_limit_per_sec`, `user_limit_per_sec`: UDP rate limits
+- `max_zone_count`, `zone_max_sessions`/`max_zone_session_count`: Zone size
+- `dbmw_*`: DBMW connection/heartbeat (currently running initialization code in main)
 
-### 메시지 프로토콜 예시 (JSON)
+### Message Protocol Example (JSON)
 
 ### TCP
- **keepalive (클라 -> 서버)**
+**keepalive (client -> server)**
   json
   {"type":"keepalive"}
 
-- **chat (클라 -> 서버)**
+- **chat (client -> server)**
   json
   {"type":"chat","nickname":"neo","msg":"hello"}
 
-- **chat_zone (클라 -> 서버)**
+- **chat_zone (client -> server)**
   json
   {"type":"chat_zone","nickname":"neo","zone_id":1,"msg":"hi zone"}
 
 
 ### UDP
- **등록 (클라 -> 서버)**
+  **Registration (Client -> Server)**
   json
   {"type":"udp_register","nickname":"neo"}
 
- **등록 응답 (서버 -> 클라)**
+  **Registration Response (Server -> Client)**
   json
   {"type":"udp_register_ack","token":"<RANDOM>","nickname":"neo"}
 
- **일반 전송 (클라 -> 서버)**
+  **Normal Transfer (Client -> Server)**
   json
   {"type":"udp","nickname":"neo","token":"<RANDOM>","msg":"..."}
 
- **에러 (서버 -> 클라)**
+  **Error (Server -> Client)**
   json
   {"type":"udp_error","code":"ENDPOINT_MISMATCH","msg":"Endpoint mismatch; please udp_register again"}
 
-<a id="monitoring"></a>
-## 5. 유지/모니터링 (Configuration)
-- 글로벌 keepalive 루프: `start_keepalive_loop()` -> `do_keepalive_check()`
-  1. 현재 **체크 주기 = 60s**, 타임아웃 임계치도 60s
-  2. 더 촘촘히 보려면 체크 주기를 1–5s로 낮추고, 임계치는 60s 유지 권장
-- 서버 상태 모니터: `start_monitor_loop()` (10s마다 활성 세션 수/메모리 로그)
-- 세션 클린업: `start_cleanup_loop()` (60s마다, 5분 이상 비활성 세션 종료)
-- 로그: spdlog -> `Server.log`
+## 5. Maintenance/Monitoring (Configuration)
+  - Global keepalive loop: `start_keepalive_loop()` -> `do_keepalive_check()`
+  1. Current **check interval = 60s**, timeout threshold also 60s
+  2. For more granularity, lower the check interval to 1–5s, and keep the threshold at 60s.
+  - Server health monitor: `start_monitor_loop()` (active session count/memory log every 10s)
+  - Session cleanup: `start_cleanup_loop()` (every 60s, terminate inactive sessions for more than 5 minutes)
+  - Log: spdlog -> `Server.log`
 
-<a id="db-middleware"></a>
-## 6. DB Middleware(옵션) (Configuration)
-- `DBMiddlewareClient` + `DBmwRouter` 구조
-- Protobuf: `wire.pb.*` 등록됨, `set_on_message_pb()`로 PB 라우팅
-- 현재 main에서 라우터/클라이언트를 생성/등록하고 하트비트로 구동
+## 6. DB Middleware (Optional) (Configuration)
+  - `DBMiddlewareClient` + `DBmwRouter` structure
+  - Protobuf: `wire.pb.*` registered, PB routing with `set_on_message_pb()`
+  - Currently, the router/client is created/registered in main and runs with a heartbeat.
 
-<a id="ops-tips"></a>
-## 7. 운영 팁
-- 모바일 품질 향상: `ENDPOINT_MISMATCH` 수신 시 클라가 **자동 재등록**(백오프 0.2->0.5->1->1.5->2s) 구현
-- 커널 TCP keepalive는 보조(앱 레벨 keepalive가 주력)
+## 7. Operational Tips
+  - Improved mobile quality: Implemented **automatic re-registration** (backoff 0.2->0.5->1->1.5->2s) when `ENDPOINT_MISMATCH` is received
+  - Kernel TCP keepalive is secondary (app-level keepalive is the primary focus)
 
-<a id="license"></a>
-## 8. 라이선스/크레딧
-- Boost, spdlog, nlohmann/json, Protocol Buffers, libcurl 사용
+## 8. License/Credit
+  - Boost, spdlog, nlohmann/json, Protocol Buffers, libcurl 사용
 
 
-### 변경 이력 (to‑do)
-- README 보강: 빌드 스텝(Windows/vcpkg, Linux), 의존성 버전 명시
-- API 상세 문서화(로그인/인증 흐름, 에러코드 표)
-- 자동 리바인딩(옵션) 플래그화 예시 추가
-- 샘플 클라이언트/테스트 스크립트 추가
+### Changelog (To-do)
+  - Improved README: Build steps (Windows/vcpkg, Linux), dependency versions
+  - Detailed API documentation (login/authentication flow, error code table)
+  - Added example of automatic rebinding (optional) flag
+  - Added sample client/test scripts
 
-<a id="api-reference"></a>
-## 9. 중요 함수 설명서 (API Reference)
+## 9. Important function documentation (API Reference)
 
-> 서명/역할/입출력/부작용/주의사항 중심의 요약. 실제 소스 기준 명칭이 다르면 가까운 위치의 함수로 이해하세요.
+> Summary focusing on signatures, roles, input/output, side effects, and cautions. If the actual source code names differ, consider the function with the closest name.
 
 ### AppContext
 - **`static AppContext& instance()`**
-  - 전역 싱글턴 접근. 설정/로거/매니저 포인터를 보유.
+  - Global singleton access. Holds pointers to settings/logger/manager.
 - **`void load_config(const std::string& path)`**
-  - `config.json` 로드/검증. 실패 시 예외 또는 종료.
+  - `config.json` Load/Validate. Throw exception or exit on failure.
 
 ### Server / ServerApplication
 - **`void Server::start_accept()`**
-  - TCP `acceptor` 비동기 수락 루프 시작. 수락 시 `Session` 생성/등록 -> `async_read` 시작.
-- **`int main()` / `ServerApplication.cpp`**
-  - `io_context` 생성, `Server`/`UDPManager`/DBMW 초기화, 시그널 처리, `run()`.
+  - TCP `acceptor` starts an asynchronous accept loop. Upon accepting, `Session` is created/registered -> `async_read` is started.
+  - **`int main()` / `ServerApplication.cpp`**
+  - Create `io_context`, initialize `Server`/`UDPManager`/DBMW, handle signals, `run()`.
 
 ### Session / SessionManager / SessionPool
 - **`void Session::start()`**
-  - 읽기 루프 시작, 세션 상태 활성화, 매니저 등록.
+- Start a read loop, enable session state, and register with the manager.
 - **`void Session::post_write(std::string_view data)`**
-  - 쓰기 큐에 데이터 push 후 비동기 전송. 큐 과다 시 경고/드롭(설정값 기준).
+- Push data to the write queue and send it asynchronously. If the queue is full, a warning or drop is issued (based on the configured value).
 - **`void Session::close_session()`**
-  - 안전 종료: 소켓 cancel/close, 매니저에서 제거, 자원 정리.
+- Safe shutdown: cancels/closes the socket, removes it from the manager, and cleans up resources.
 - **`void Session::update_alive_time()`**
-  - 마지막 활동 시각을 `steady_clock::now()`로 업데이트(keepalive/정상메시지 수신 시 호출 권장).
+- Updates the last activity time with `steady_clock::now()` (recommended when a keepalive/normal message is received).
 - **`void Session::set_udp_endpoint(udp::endpoint ep)` / `std::optional<udp::endpoint> get_udp_endpoint()`**
-  - 세션에 UDP 엔드포인트 바인딩/조회.
+- Binds/queries a UDP endpoint to the session.
 - **`void Session::set_udp_token(std::string token, std::chrono::steady_clock::time_point expire)` / `bool is_udp_token_valid()`**
-  - UDP 토큰/만료 설정과 유효성 검사.
+- Set and validate UDP tokens/expiration.
 - **`SessionManager::find_by_nickname(const std::string&)`**
-  - 닉네임 -> 세션 조회. 없으면 `nullptr`.
+- Look up nicknames in a session. If not found, `nullptr`.
 - **`SessionPool::acquire()/release()`**
-  - 세션 객체 풀 관리(성능/할당 최적화).
+- Manage a session object pool (performance/allocation optimization).
 
 ### DataHandler (핵심 오케스트레이션)
+### DataHandler (Core Orchestration)
 - **`void DataHandler::start_keepalive_loop()`**
-  - `keepalive_timer_` 설정 후 `async_wait`로 **주기 실행**. 만료 시 `do_keepalive_check()` 호출 후 **재무장**.
+- Set `keepalive_timer_` and **execute the cycle** with `async_wait`. When it expires, call `do_keepalive_check()` and **rearm**.
 - **`void DataHandler::do_keepalive_check()`**
-  - 모든 세션 순회 -> `now - last_alive > keepalive_timeout_` 이면 임시 벡터에 수집 -> 루프 밖에서 `close_session()` 실행.
-- **`void DataHandler::on_udp_receive(const std::string& data, const udp::endpoint& from, udp::socket& sock)`**
-  - UDP 파이프라인: 파싱 -> 세션 조회 -> (udp_register 제외) 토큰/TTL 확인 -> **엔드포인트 일치 검사(불일치 시 `udp_error: ENDPOINT_MISMATCH`)** -> 레이트리밋 -> 핸들러 디스패치.
+- Iterate over all sessions -> If `now - last_alive > keepalive_timeout_`, collect them in a temporary vector -> Call `close_session()` outside the loop. - **`void DataHandler::on_udp_receive(const std::string& data, const udp::endpoint& from, udp::socket& sock)`**
+- UDP pipeline: Parse -> Session lookup -> (except udp_register) Token/TTL verification -> **Endpoint match check (`udp_error: ENDPOINT_MISMATCH` if mismatched)** -> Late limit -> Handler dispatch.
 - **`void DataHandler::dispatch_udp_parsed(const nlohmann::json& j, ...)`**
-  - `type`별로 `Udp*Handler` 호출.
+- Call `Udp*Handler` by `type`.
 - **`void DataHandler::broadcast_to_zone(int zone_id, std::string_view msg)` / `broadcast_all(...)`**
-  - 존/전체 브로드캐스트. 세션 필터링/큐 크기 주의.
+- Zone/all broadcasts. Be careful with session filtering and queue size.
 
 ### MessageDispatcher
 - **`void MessageDispatcher::dispatch_tcp(Session&, std::string_view json)`**
