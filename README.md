@@ -175,9 +175,8 @@ graph TD
   8. UDP 핸들러 호출(`udp`, `broadcast_udp`, `broadcast_udp_zone` 등)
 
 > **네트워크 전환(Wi‑Fi↔LTE)**: 엔드포인트(IP:포트)가 바뀌면 서버가 `ENDPOINT_MISMATCH`를 보내므로 **클라는 `udp_register` 재요청**으로 새 토큰을 수령해야 합니다.
-```
+---
 
-<a id="project-structure"></a>
 ## 3. 프로젝트 구조
 
 ServerApplication/
@@ -214,7 +213,6 @@ ServerApplication/
   wire.proto              - PB 정의
   config.json             - 서버 설정
 
-<a id="configuration"></a>
 ## 4. 설정 및 프로토콜 (Configuration)
 
 - `tcp_port`, `udp_port`: 포트
