@@ -129,18 +129,19 @@ sequenceDiagram
         Session->>Session: Rate Limit Check
         Session->>Server: Process Message
     end
-
+```
 ### Keepalive & Lifecycle
+
 ```mermaid
 graph TD
     A[Start Keepalive Loop] --> B{Check All Sessions}
     B -->|Active| C[Update Timestamp]
-    B -->|Timeout (>60s)| D[Collect Stale Sessions]
+    B -->|Timeout > 60s| D[Collect Stale Sessions]
     D --> E[Close Session & Release Resource]
     E --> F[Session Pool]
     B --> G[Wait 60s]
-    G --> B    
-
+    G --> B
+```
     갱신: keepalive 패킷 수신 시 Session::update_alive_time() 호출.
 
     감시: 글로벌 타이머 DataHandler::start_keepalive_loop()가 60초 간격으로 실행.
