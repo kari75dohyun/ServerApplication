@@ -177,6 +177,7 @@ graph TD
 > **네트워크 전환(Wi‑Fi↔LTE)**: 엔드포인트(IP:포트)가 바뀌면 서버가 `ENDPOINT_MISMATCH`를 보내므로 **클라는 `udp_register` 재요청**으로 새 토큰을 수령해야 합니다.
 ```
 
+<a id="project-structure"></a>
 ## 3. 프로젝트 구조
 
 ServerApplication/
@@ -213,7 +214,7 @@ ServerApplication/
   wire.proto              - PB 정의
   config.json             - 서버 설정
 
-
+<a id="configuration"></a>
 ## 4. 설정 및 프로토콜 (Configuration)
 
 - `tcp_port`, `udp_port`: 포트
@@ -256,7 +257,7 @@ ServerApplication/
   json
   {"type":"udp_error","code":"ENDPOINT_MISMATCH","msg":"Endpoint mismatch; please udp_register again"}
 
-
+<a id="monitoring"></a>
 ## 5. 유지/모니터링 (Configuration)
 - 글로벌 keepalive 루프: `start_keepalive_loop()` -> `do_keepalive_check()`
   1. 현재 **체크 주기 = 60s**, 타임아웃 임계치도 60s
@@ -265,18 +266,18 @@ ServerApplication/
 - 세션 클린업: `start_cleanup_loop()` (60s마다, 5분 이상 비활성 세션 종료)
 - 로그: spdlog -> `Server.log`
 
-
+<a id="db-middleware"></a>
 ## 6. DB Middleware(옵션) (Configuration)
 - `DBMiddlewareClient` + `DBmwRouter` 구조
 - Protobuf: `wire.pb.*` 등록됨, `set_on_message_pb()`로 PB 라우팅
 - 현재 main에서 라우터/클라이언트를 생성/등록하고 하트비트로 구동
 
-
+<a id="ops-tips"></a>
 ## 7. 운영 팁
 - 모바일 품질 향상: `ENDPOINT_MISMATCH` 수신 시 클라가 **자동 재등록**(백오프 0.2->0.5->1->1.5->2s) 구현
 - 커널 TCP keepalive는 보조(앱 레벨 keepalive가 주력)
 
-
+<a id="license"></a>
 ## 8. 라이선스/크레딧
 - Boost, spdlog, nlohmann/json, Protocol Buffers, libcurl 사용
 
@@ -287,7 +288,7 @@ ServerApplication/
 - 자동 리바인딩(옵션) 플래그화 예시 추가
 - 샘플 클라이언트/테스트 스크립트 추가
 
-
+<a id="api-reference"></a>
 ## 9. 중요 함수 설명서 (API Reference)
 
 > 서명/역할/입출력/부작용/주의사항 중심의 요약. 실제 소스 기준 명칭이 다르면 가까운 위치의 함수로 이해하세요.
