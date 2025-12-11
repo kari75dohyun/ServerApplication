@@ -795,7 +795,6 @@ ServerApplication/
 - **`SessionPool::acquire()/release()`**
 - Manage a session object pool (performance/allocation optimization).
 
-### DataHandler (핵심 오케스트레이션)
 ### DataHandler (Core Orchestration)
 - **`void DataHandler::start_keepalive_loop()`**
 - Set `keepalive_timer_` and **execute the cycle** with `async_wait`. When it expires, call `do_keepalive_check()` and **rearm**.
@@ -809,139 +808,138 @@ ServerApplication/
 
 ### MessageDispatcher
 - **`void MessageDispatcher::dispatch_tcp(Session&, std::string_view json)`**
-  - TCP JSON 메시지의 `type` 분기(`keepalive`, `chat`, `chat_zone`, `login` 등) -> 각 핸들러 호출.
+- `type` branch of a TCP JSON message (`keepalive`, `chat`, `chat_zone`, `login`, etc.) -> Call each handler.
 - **`void MessageDispatcher::dispatch_udp(...)`**
-  - UDP `type` 분기(`udp`, `broadcast_udp`, `broadcast_udp_zone`, `udp_register`).
+- UDP `type` branch (`udp`, `broadcast_udp`, `broadcast_udp_zone`, `udp_register`).
 
 ### TCP Message Handlers
 - **`KeepaliveHandler::handle(Session&, const json&)`**
-  - keepalive 수신 시 `session.update_alive_time()` 호출. 응답은 선택(보통 무응답).
+- Call `session.update_alive_time()` when a keepalive is received. The response is optional (usually no response).
 - **`ChatHandler::handle(Session&, const json&)`**
-  - 일반 채팅. 필드 검증(`nickname`,`msg`) -> 전체/필터 대상 브로드캐스트.
+- General chat. Validate fields (`nickname`, `msg`) -> Broadcast to all/filtered targets.
 - **`ChatZoneHandler::handle(Session&, const json&)`**
-  - 존 채팅. `zone_id`로 대상 그룹 선택 후 전송.
+- Zone chat. Select target group using `zone_id` and send.
 - **`CertifyHandler::handle(Session&, const json&)` / UseCases::LoginFlow**
-  - 로그인/닉네임 등록/인증 흐름. 성공 시 `Session`에 닉네임/상태 세팅.
+- Login/nickname registration/authentication flow. Upon success, set nickname/status to `Session`.
 
 ### UDP Message Handlers
 - **`UdpRegisterHandler::handle(Session&, const json&, const udp::endpoint& from, udp::socket&)`**
-  - **엔드포인트 바인딩** + **랜덤 토큰 발급**(TTL= `udp_token_ttl_seconds`) -> `udp_register_ack` 응답.
+- **Endpoint binding** + **random token issuance** (TTL= `udp_token_ttl_seconds`) -> `udp_register_ack` response.
 - **`UdpHandler::handle(...)`**
-  - 기본 UDP 에코/메시지 처리 샘플. 토큰/엔드포인트 검증 통과가 전제.
+- Basic UDP echo/message processing sample. Token/endpoint validation is assumed.
 - **`UdpBroadcastHandler::handle(...)` / `UdpBroadcastZoneHandler::handle(...)`**
-  - UDP 브로드캐스트(전체/존). 크기/빈도 레이트리밋 주의.
+- UDP broadcast (global/zone). Be careful about size/rate limits.
 
 ### UDPManager
 - **`void UDPManager::start_receive()`**
-  - `socket_.async_receive_from(...)`로 비동기 수신 루프. 수신 시 `DataHandler::on_udp_receive(...)` 호출 후 **재무장**.
+- Start an asynchronous receive loop with `socket_.async_receive_from(...)`. Upon receiving, call `DataHandler::on_udp_receive(...)` and **rearm**.
 
 ### Zone / ZoneManager
 - **`ZoneManager::add_session_to_zone(int zone_id, Session&)` / `remove_session_from_zone(...)`**
-  - 세션의 존 가입/탈퇴 관리, 맵/컨테이너 갱신.
+- Manage session joins/leaves from zones, updating maps/containers.
 - **`Zone::broadcast(std::string_view msg)`**
-  - 해당 존에 속한 세션들에게 메시지 전송.
+- Send a message to sessions belonging to the zone.
 
 ### Logger / Utility / MemoryTracker
 - **`Logger::init()`**
-  - spdlog 파일 로거 초기화. 로그 레벨/패턴 구성.
+- Initializes the spdlog file logger. Configures the log level/pattern.
 - **`Utility::generate_random_token(size_t n)`**
-  - 고엔트로피 랜덤 토큰 생성(UDP 토큰 등).
+- Generates high-entropy random tokens (e.g., UDP tokens).
 - **`Utility::rate_limiter_xxx(...)`**
-  - 총량/유저별 레이트리밋 헬퍼.
+- Rate limit helpers for total and per-user usage.
 - **`MemoryTracker::log_usage()`**
-  - 주기적으로 메모리 사용량 기록.
+- Periodically records memory usage.
 
-### DB Middleware (옵션)
+### DB Middleware (Optional)
 - **`DBMiddlewareClient::start()` / `stop()` / `send()`**
-  - 외부 DBMW 서버와의 TCP 연결/하트비트/송수신.
+- TCP connection/heartbeat/transmit/receive with an external DBMW server.
 - **`DBmwRouter::route(json/pb)`**
-  - 들어온 메시지를 등록된 핸들러에게 전달.
+- Forwards incoming messages to registered handlers.
 
 ---
 
-### 주의 사례
-- **타이머 루프**: `async_wait` 콜백에서 **반드시 재무장**(다시 `expires_after`+`async_wait`).
-- **객체 수명**: 비동기 콜백에서 `this` 캡처 시 `shared_from_this()` 사용.
-- **엔드포인트 정책**: UDP는 항상 **토큰+엔드포인트 이중 검증**. 불일치 시 `ENDPOINT_MISMATCH` -> 클라 `udp_register` 필요.
-- **타임아웃 튜닝**: 클라 keepalive 20s 기준, 서버 keepalive_timeout_ ≥ 60s 권장.
+### Cautionary Cases
+- **Timer Loops**: The `async_wait` callback must **rearm** (re-use `expires_after` + `async_wait`).
+- **Object Lifetime**: Use `shared_from_this()` to capture `this` in the asynchronous callback.
+- **Endpoint Policy**: UDP always **double-validates the token and endpoint**. If a mismatch occurs, `ENDPOINT_MISMATCH` is returned, requiring the client to `udp_register`.
+- **Timeout Tuning**: The client keepalive is set to 20s, and a server keepalive_timeout_ ≥ 60s is recommended.
 
 
-### Session class (한 명의 클라 연결 단위)
+### Session class (a single client connection unit)
 
-- 역할
+- Roles
 
-1. TCP 소켓 I/O 비동기 처리 (async_read_some, 길이프리픽스 write 등)
+1. Asynchronous TCP socket I/O processing (async_read_some, length-prefixed write, etc.)
 
-2. 메시지 누적/분리(MessageBufferManager)와 JSON 파싱 -> DataHandler/Dispatcher로 전달
+2. Message accumulation/decomposition (MessageBufferManager) and JSON parsing -> forwarding to DataHandler/Dispatcher
 
-3. 송신 직렬화 큐(Write Queue)와 세대(generation_) 체크로 stale 콜백 방지
+3. Preventing stale callbacks with a write queue and generation check (generation_)
 
-4. 로그인/닉네임 상태, 로그인 타임아웃, keepalive 타임스탬프
+4. Login/nickname status, login timeout, keepalive timestamp
 
-5. UDP 관련 상태(토큰, TTL, 클라의 UDP endpoint, 레이트리밋 토큰버킷)
+5. UDP-related status (token, TTL, client UDP endpoint, late-limit token bucket)
 
-6. 생명주기 플래그(닫힘/활성/해제 등)와 cleanup(), close_session()
+6. Lifecycle flags (closed/active/deactivated, etc.) and cleanup() and close_session()
 
--  핵심 포인트
+- Key Points
 
-1. generation_: reset() 후 증가시켜 이전 비동기 콜백이 현재 세션을 건드리지 못하게 함.
+1. generation_: Increment after reset() to prevent previous asynchronous callbacks from modifying the current session.
 
-2. post_write() -> 내부 큐에 넣고 do_write_queue()가 하나씩 전송(직렬화·흐름제어).
+2. post_write() -> Places it in an internal queue, and do_write_queue() transmits it one by one (serialization/flow control).
 
-3. on_nickname_registered()에서 상태를 Ready로 바꾸고 로그인 타이머 취소.
+3. on_nickname_registered() changes the status to Ready and cancels the login timer.
 
-4. UDP는 Session이 토큰/엔드포인트/TTL을 들고 있고, 실제 매핑 테이블은 DataHandler가 관리.
+4. For UDP, the Session holds the token/endpoint/TTL, and the DataHandler manages the actual mapping table.
 
-### SessionManager class (세션 저장소/인덱서/락 관리)
+### SessionManager class (session storage/indexer/lock management)
 
-- 역할
+- Role
 
-1. add_session(session): 샤딩된 버킷(예: std::vector<std::unordered_map<int, shared_ptr<Session>>>)에 세션ID로 저장
+1. add_session(session): Stores the session ID in a sharded bucket (e.g., std::vector<std::unordered_map<int, shared_ptr<Session>>>)
 
-2. 샤드별 mutex로 잠금 범위를 좁혀 성능↑
+2. Increases performance by narrowing the lock scope with a per-shard mutex
 
-3. 같은 session_id가 이미 있으면 세대 비교 후 교체(이전 세대면 replaced_session를 잠금 밖에서 종료)
+3. If the same session_id already exists, compare generations and replace it (if it's in the previous generation, terminate the replaced_session outside the lock).
 
-4. remove_session(session_id): 안전하게 제거하고 포인터 반환(필요 시 호출자가 후처리)
+4. remove_session(session_id): Safely removes the session and returns a pointer (for post-processing by the caller, if necessary).
 
-5. find_session(session_id), find_session_by_nickname(nick): 조회
+5. find_session(session_id), find_session_by_nickname(nick): Lookup.
 
-5. 닉네임은 nickname_index_ (unordered_map<string, weak_ptr<Session>>)로 O(1) 인덱스 제공
+5. Nickname provides an O(1) index using nickname_index_(unordered_map<string, weak_ptr<Session>>).
 
-6. for_each_session(fn): 락 짧게 -> 스냅샷 만들고 -> 락 해제 후 순회(브로드캐스트 I/O 병목 방지)
+6. for_each_session(fn): Shorten locking -> Create a snapshot -> Release the lock and iterate (avoid broadcast I/O bottlenecks).
 
-7. 보조 유지보수: cleanup_expired_nicknames()(만료 weak_ptr 청소), cleanup_inactive_sessions() 등
+7. Auxiliary maintenance: cleanup_expired_nicknames() (cleans expired weak_ptr), cleanup_inactive_sessions(), etc.
 
-- 핵심 포인트
+- Key Points
 
-1. 동시성: “샤드 + 샤드별 mutex”로 락 경합 줄임. 순회는 스냅샷 후 락 해제가 원칙.
+1. Concurrency: Reduce lock contention with "shards + per-shard mutex." Traversal typically releases locks after snapshots.
 
-2. 대체 로직: add_session에서 같은 ID 충돌 시 generation으로 재사용/재연결을 구분.
+2. Replacement Logic: In case of ID conflicts in add_session, reuse/reconnect is determined by generation.
 
-3. 동일 generation이면 같은 객체 재사용 -> 교체/종료 안 함
+3. If the object is in the same generation, the same object is reused -> no replacement/termination is performed.
 
-4. 다른 generation이면 이전 것을 교체 대상으로 잡고 락 밖에서 close_session() 호출
+4. If the object is in a different generation, the previous object is considered for replacement and close_session() is called outside the lock.
 
-5. 닉네임 인덱스: 로그인 완료 시 register_nickname(nick, session)로 색인. 로그아웃/종료 시 unregister.
+5. Nickname Index: Upon login, register_nickname(nick, session) is used as the index. Upon logout/termination, unregister is performed.
 
+### Interaction between the two (login-based flow)
 
-### 둘의 상호작용(로그인 기준 흐름)
+1. Server accepts a new TCP connection -> Session is created (or SessionPool.acquire) -> SessionManager.add_session
 
-1. 서버가 새 TCP 연결 수락 -> Session 생성(또는 SessionPool.acquire) -> SessionManager.add_session
+2. Client sends {"type":"login","nickname":"..."}
 
-2. 클라가 {"type":"login","nickname":"..."} 전송
+3. MessageDispatcher.login_handler -> (DB authentication success or temporary bypass policy)
 
-3. MessageDispatcher.login_handler -> (DB인증 성공 혹은 임시 우회 정책)
-
-4. 중복 로그인 처리: find_session_by_nickname(nick)로 이전 세션 있으면 알림 후 종료
+4. Duplicate login handling: If a previous session exists, use find_session_by_nickname(nick) to notify and terminate.
 
 5. session -> set_nickname(nick), on_nickname_registered()
 
 6. SessionManager.register_nickname(nick, session)
 
-7. 존 배정 등 부가 처리 후 입장 notice 브로드캐스트
+7. After additional processing such as zone assignment, an entry notification is broadcast.
 
-8. 이때 SessionManager.for_each_session은 스냅샷 후 락 해제 -> 각 세션에 post_write(I/O는 락 밖)
+8. SessionManager.for_each_session takes a snapshot and releases the lock -> post_writes to each session (I/O is outside the lock).
 
-9. 이후 채팅/UDP 등은 각 Session의 상태/큐를 통해 송수신함 
+9. Subsequent chat/UDP requests are sent and received through the status/queue of each session.
 ---
