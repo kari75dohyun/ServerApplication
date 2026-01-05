@@ -5,7 +5,7 @@
 
 # Korean
 
-# ServerApplication (High-Performance C++ Game Server)
+# ServerApplication (High-Performance C++ Game Server framework)
 
 ![C++](https://img.shields.io/badge/C++-17-blue.svg?logo=c%2B%2B)
 ![Boost.Asio](https://img.shields.io/badge/Boost.Asio-1.88.0-green.svg)
@@ -27,15 +27,17 @@
 
 ## Core Focus
 
-- **Boost.Asio Game Server Example**
+- **Boost.Asio Game Server framework Example**
 - **Reliable UDP Game Networking**
 - **C++ MMO Server Architecture Reference**
 
 ## Project Scope
 
+Boost.Asio를 사용하여 구축되었으며 확장성, 안정성 및 안전한 UDP 네트워킹을 중심으로 설계된 C++ MMO 스타일 서버 아키텍처의 참조 구현입니다.
 이 프로젝트는 **중형 MMO를 염두에 둔 서버 프레임워크 설계 예제**이며,  
 게임 로직은 **의도적으로 최소화**하여  
-**확장성, 안정성, 네트워크 구조**에 집중했습니다, 아직 완성된 버전은 아니지만, 연구하고 학습하는데는 좋을듯 합니다.
+**확장성, 안정성, 네트워크 구조**에 집중했습니다, 아직 완성된 버전은 아니지만, 연구하고 학습하는데는 좋을 듯 합니다.
+
 
 ##  목차 (Table of Contents)
 1. [빠른 시작 (Quick Start)](#1-빠른-시작-quick-start)
@@ -490,7 +492,7 @@ ServerApplication/
 ---
 
 # English
-# ServerApplication (High-Performance C++ Game Server)
+# ServerApplication (High-Performance C++ Game Server framework)
 
 ![C++](https://img.shields.io/badge/C++-17-blue.svg?logo=c%2B%2B)
 ![Boost.Asio](https://img.shields.io/badge/Boost.Asio-1.88.0-green.svg)
@@ -512,15 +514,18 @@ ServerApplication/
 
 ## Core Focus
 
-- **Boost.Asio Game Server Example**
+- **Boost.Asio Game Server framework Example**
 - **Reliable UDP Game Networking**
 - **C++ MMO Server Architecture Reference**
 
 ## Project Scope
 
+A reference implementation of a C++ MMO-style server architecture,
+built with Boost.Asio and designed around scalability, stability, and secure UDP networking.
 This project is a **server framework design example for a medium-sized MMO**. 
 Game logic is **intentionally minimized**,
 focusing on **scalability, stability, and network architecture**. While not yet complete, it's a useful tool for research and learning.
+
 
 ##  Table of Contents
 1. [Quick Start](#1-quick-start)
