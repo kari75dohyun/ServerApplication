@@ -35,7 +35,7 @@
 
 이 프로젝트는 **중형 MMO를 염두에 둔 서버 프레임워크 설계 예제**이며,  
 게임 로직은 **의도적으로 최소화**하여  
-**확장성, 안정성, 네트워크 구조**에 집중했습니다.
+**확장성, 안정성, 네트워크 구조**에 집중했습니다, 아직 완성된 버전은 아니지만, 연구하고 학습하는데는 좋을듯 합니다.
 
 ##  목차 (Table of Contents)
 1. [빠른 시작 (Quick Start)](#1-빠른-시작-quick-start)
@@ -518,9 +518,9 @@ ServerApplication/
 
 ## Project Scope
 
-This project is a **server framework design example designed for a mid-sized MMO**.
+This project is a **server framework design example for a medium-sized MMO**. 
 Game logic is **intentionally minimized**,
-focusing on **scalability, stability, and network architecture**.
+focusing on **scalability, stability, and network architecture**. While not yet complete, it's a useful tool for research and learning.
 
 ##  Table of Contents
 1. [Quick Start](#1-quick-start)
