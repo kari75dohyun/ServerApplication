@@ -1,4 +1,4 @@
-# ServerApplication – README (v1)
+# GameServer_Application – README (v1)
 
 [한국어(KR)](#korean) | [English(EN)](#english)
 ---
