@@ -24,6 +24,7 @@
 * ** Secure UDP:** 단순 UDP가 아닌, **3-way Handshake(토큰 발급)** 및 **엄격한 엔드포인트 검증**을 통한 스푸핑 방지.
 * ** Smart Session Management:** `Generation ID`를 활용한 Stale Session 방지 및 `weak_ptr` 기반의 안전한 생명주기 관리.
 * ** Scalable Architecture:** 존(Zone) 기반 브로드캐스팅 시스템 및 외부 DB Middleware(DBMW) 연동을 위한 Protobuf 라우팅 구조.
+* ** 이 프로젝트는 중형 MMO를 염두에 둔 서버 프레임워크 설계 예제이며, 게임 로직은 의도적으로 최소화했다. 아직 완성된 본은 아닙니다.
 
 ##  목차 (Table of Contents)
 1. [빠른 시작 (Quick Start)](#1-빠른-시작-quick-start)
@@ -497,6 +498,7 @@ ServerApplication/
 * ** Secure UDP:** Prevents spoofing via **3-way Handshake (token issuance)** and **strict endpoint verification**, going beyond simple UDP.
 * ** Smart Session Management:** Prevents Stale Sessions using `Generation ID` and ensures safe lifecycle management based on `weak_ptr`.
 * ** Scalable Architecture:** Zone-based broadcasting system and Protobuf routing structure for external DB Middleware (DBMW) integration.
+* ** This project is an example of a server framework design for a medium-sized MMO, with game logic intentionally kept to a minimum. It's not yet a finished product.
 
 ##  Table of Contents
 1. [Quick Start](#1-quick-start)
